@@ -28,7 +28,10 @@ from fuse_submaps import (
     visualize_map, add_noise_to_pose, downsample_map, ternarize_map
 )
 from particle_filter_matcher import ParticleFilter, encode_key, match_submap_with_particle_filter
-from xxx_match import match_submap_with_grid_correlation
+from grid_corr_matcher import (
+    match_submap_with_grid_correlation,
+    coarse_to_fine_grid_match,
+)
 from typing import List, Tuple
 import glob
 import argparse
@@ -912,12 +915,14 @@ def generate_multi_resolution_submap(submap: GridMap) -> dict:
     
     return submaps
 
-def multi_resolution_optimization(multi_res_submaps: dict,
-                                multi_res_global_maps: dict,
-                                init_pose: np.ndarray,
-                                true_pose: np.ndarray = None,
-                                visualize: bool = False,
-                                use_grid_match: bool = False) -> tuple:
+def multi_resolution_optimization(
+    multi_res_submaps: dict,
+    multi_res_global_maps: dict,
+    init_pose: np.ndarray,
+    true_pose: np.ndarray = None,
+    visualize: bool = False,
+    use_grid_corr: bool = False,
+) -> tuple:
     """多分辨率位姿优化
     
     Args:
@@ -1008,7 +1013,7 @@ def multi_resolution_optimization(multi_res_submaps: dict,
         
         try:
             # 执行当前分辨率的优化
-            if use_grid_match:
+            if use_grid_corr:
                 print(f"开始栅格相关匹配...")
                 optimized_pose, final_error = match_submap_with_grid_correlation(
                     submap,
@@ -1124,7 +1129,7 @@ def multi_resolution_optimization(multi_res_submaps: dict,
             spread_y *= 2
             spread_theta *= 2
             
-            if use_grid_match:
+            if use_grid_corr:
                 optimized_pose, final_error = match_submap_with_grid_correlation(
                     multi_res_submaps[0.1],
                     multi_res_global_maps[0.1],
@@ -1194,7 +1199,11 @@ def main():
     parser.add_argument("--submap", type=int, help="指定要优化的子图ID，默认为随机选择")
     parser.add_argument("--multi-res", action="store_true",
                        help="使用多分辨率匹配策略：从低分辨率(1.6m)到高分辨率(0.1m)逐层优化，提高收敛效率和鲁棒性")
-    parser.add_argument("--xxx", action="store_true", help="使用栅格相关匹配算法")
+    parser.add_argument(
+        "--grid-corr",
+        action="store_true",
+        help="使用栅格相关匹配算法",
+    )
     args = parser.parse_args()
 
     folder_path = args.folder_path
@@ -1202,7 +1211,7 @@ def main():
     use_gt = args.use_gt # 获取--use-gt参数的值
     specified_submap_id = args.submap # 获取--submap参数的值
     use_multi_res = args.multi_res # 获取--multi-res参数的值
-    use_xxx = args.xxx # 获取--xxx参数的值
+    use_grid_corr = args.grid_corr # 获取--grid-corr参数的值
 
     # 1. 加载全局地图（单分辨率或多分辨率）
     if use_multi_res:
@@ -1281,17 +1290,25 @@ def main():
         multi_res_submaps = generate_multi_resolution_submap(submap)
         
         # 执行多分辨率优化
-        opt_pose, error = multi_resolution_optimization(
-            multi_res_submaps,
-            multi_res_global_maps,
-            init_pose,
-            true_pose,  # 传递真值位姿用于可视化
-            visualize=plot_intermediate,
-            use_grid_match=use_xxx
-        )
+        if use_grid_corr:
+            opt_pose, error = coarse_to_fine_grid_match(
+                multi_res_submaps,
+                multi_res_global_maps,
+                init_pose,
+                visualize=plot_intermediate,
+            )
+        else:
+            opt_pose, error = multi_resolution_optimization(
+                multi_res_submaps,
+                multi_res_global_maps,
+                init_pose,
+                true_pose,  # 传递真值位姿用于可视化
+                visualize=plot_intermediate,
+                use_grid_corr=False,
+            )
     else:
         print("使用单分辨率优化...")
-        if use_xxx:
+        if use_grid_corr:
             opt_pose, error = match_submap_with_grid_correlation(
                 submap,
                 global_map,
