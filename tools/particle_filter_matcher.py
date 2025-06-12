@@ -66,7 +66,7 @@ class ParticleFilter:
             p.theta += dtheta + np.random.normal(0, self.motion_noise[2])
             p.theta = np.mod(p.theta + np.pi, 2*np.pi) - np.pi  # normalize angle
             
-    def update_weights(self, 
+    def update_weights(self,
                       submap: 'GridMap',
                       global_map: 'GridMap',
                       submap_res: float = 0.05,
@@ -103,8 +103,8 @@ class ParticleFilter:
                 p_w = T[:3, :3] @ p_s + T[:3, 3]
                 
                 # Convert to global map grid coordinates
-                gi_glob = int(np.floor(p_w[0] / global_res))
-                gj_glob = int(np.floor(p_w[1] / global_res))
+                gi_glob = int(np.round(p_w[0] / global_res))
+                gj_glob = int(np.round(p_w[1] / global_res))
                 
                 # Check occupancy in global map
                 key_glob = encode_key(gi_glob, gj_glob)
@@ -187,6 +187,7 @@ def match_submap_with_particle_filter(submap: 'GridMap',
                                     n_iterations: int = 200,
                                     visualize: bool = True,
                                     spread: Tuple[float, float, float] = (0.5, 0.5, np.pi/6),
+                                    submap_res: float = 0.05,
                                     global_res: float = 0.1) -> Tuple[np.ndarray, float]:
     """Match submap to global map using particle filter
     
@@ -232,16 +233,16 @@ def match_submap_with_particle_filter(submap: 'GridMap',
     
     for iter in range(n_iterations):
         # Predict (random walk for exploration)
-        pf.predict(np.eye(4)) # Rely on internal motion_noise for spread
-        
+        pf.predict(np.eye(4))
+
         # Update weights based on map matching
-        pf.update_weights(submap, global_map)
+        pf.update_weights(submap, global_map, submap_res=submap_res, global_res=global_res)
         
         # Get current estimate
         current_pose = pf.get_estimated_pose()
         
         # Calculate current error
-        error = compute_matching_error(submap, global_map, current_pose)
+        error = compute_matching_error(submap, global_map, current_pose, submap_res=submap_res, global_res=global_res)
         
         # Update best pose if needed
         if error < min_error:
@@ -282,7 +283,7 @@ def match_submap_with_particle_filter(submap: 'GridMap',
             ax1.scatter(particle_matrix_cols, particle_matrix_rows, c='red', s=weights, alpha=0.5)
             
             # Plot transformed submap
-            temp_map = transform_submap(submap, current_pose)
+            temp_map = transform_submap(submap, current_pose, submap_res, global_res)
             match_grid = temp_map.to_matrix()
             ax2.imshow(match_grid, cmap='gray', origin='upper')
             ax2.set_title(f'Matching Result (Iter {iter})')
@@ -321,8 +322,8 @@ def compute_matching_error(submap: 'GridMap',
         p_w = pose[:3, :3] @ p_s + pose[:3, 3]
         
         # Convert to global map grid coordinates
-        gi_glob = int(np.floor(p_w[0] / global_res))
-        gj_glob = int(np.floor(p_w[1] / global_res))
+        gi_glob = int(np.round(p_w[0] / global_res))
+        gj_glob = int(np.round(p_w[1] / global_res))
         
         # Check occupancy in global map
         key_glob = encode_key(gi_glob, gj_glob)
@@ -333,27 +334,29 @@ def compute_matching_error(submap: 'GridMap',
     
     return total_error / max(count, 1)
 
-def transform_submap(submap: 'GridMap', pose: np.ndarray) -> 'GridMap':
+def transform_submap(submap: 'GridMap', pose: np.ndarray,
+                     submap_res: float = 0.05,
+                     global_res: float = 0.1) -> 'GridMap':
     """Transform submap using given pose"""
     transformed = GridMap()
-    
+
     for key, p_sub in submap.occ_map.items():
         sub_i, sub_j = decode_key(key)
-        
+
         # Convert to physical coordinates
         p_s = np.array([
-            sub_i * 0.05,  # submap_res
-            sub_j * 0.05,
+            sub_i * submap_res,
+            sub_j * submap_res,
             0.0
         ])
-        
+
         # Transform to world coordinates
         p_w = pose[:3, :3] @ p_s + pose[:3, 3]
-        
+
         # Convert to global map grid coordinates
-        gi_glob = int(np.floor(p_w[0] / 0.1))  # global_res
-        gj_glob = int(np.floor(p_w[1] / 0.1))
-        
+        gi_glob = int(np.round(p_w[0] / global_res))
+        gj_glob = int(np.round(p_w[1] / global_res))
+
         transformed.update_occ(gi_glob, gj_glob, p_sub)
-    
-    return transformed 
+
+    return transformed

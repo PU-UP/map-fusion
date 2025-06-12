@@ -86,8 +86,8 @@ def compute_error_and_jacobian(pose_params: np.ndarray,
         p_w = R @ p_s + t
         
         # 计算全局地图栅格索引
-        gi_glob = int(np.floor(p_w[0] / global_res))
-        gj_glob = int(np.floor(p_w[1] / global_res))
+        gi_glob = int(np.round(p_w[0] / global_res))
+        gj_glob = int(np.round(p_w[1] / global_res))
         
         # 在7x7邻域内搜索最近的占用栅格
         min_dist = float('inf')
@@ -185,8 +185,8 @@ def transform_submap_to_size(submap: GridMap, pose: np.ndarray,
         p_w = pose[:3, :3] @ p_s + pose[:3, 3]
         
         # 转换到全局地图栅格坐标（使用全局地图分辨率）
-        gi_glob = int(np.floor(p_w[0] / global_res))
-        gj_glob = int(np.floor(p_w[1] / global_res))
+        gi_glob = int(np.round(p_w[0] / global_res))
+        gj_glob = int(np.round(p_w[1] / global_res))
         
         # 检查是否在目标尺寸范围内
         if 0 <= gi_glob < target_shape[0] and 0 <= gj_glob < target_shape[1]:
@@ -327,11 +327,12 @@ def optimize_submap_pose(submap: GridMap,
 
         optimized_pose, final_error = match_submap_with_particle_filter(
             submap, global_map, init_pose,
-            n_particles=100, # 减少粒子数量
-            n_iterations=200, 
+            n_particles=100,
+            n_iterations=200,
             visualize=visualize,
-            spread=(spread_x_m, spread_y_m, spread_theta_rad), 
-            global_res=0.1 
+            spread=(spread_x_m, spread_y_m, spread_theta_rad),
+            submap_res=0.05,
+            global_res=0.1
         )
         return optimized_pose, final_error
     else:
@@ -529,8 +530,8 @@ def compute_matching_error(submap: GridMap,
         p_w = pose[:3, :3] @ p_s + pose[:3, 3]
         
         # Convert to global map grid coordinates using global resolution
-        gi_glob = int(np.floor(p_w[0] / global_res))
-        gj_glob = int(np.floor(p_w[1] / global_res))
+        gi_glob = int(np.round(p_w[0] / global_res))
+        gj_glob = int(np.round(p_w[1] / global_res))
         
         # Check occupancy in global map
         key_glob = encode_key(gi_glob, gj_glob)
@@ -576,8 +577,8 @@ def transform_submap(submap: GridMap, pose: np.ndarray,
         p_w = pose[:3, :3] @ p_s + pose[:3, 3]
         
         # 转换到全局地图栅格坐标（使用全局地图分辨率）
-        gi_glob = int(np.floor(p_w[0] / global_res))
-        gj_glob = int(np.floor(p_w[1] / global_res))
+        gi_glob = int(np.round(p_w[0] / global_res))
+        gj_glob = int(np.round(p_w[1] / global_res))
         
         transformed.update_occ(gi_glob, gj_glob, p_sub)
     
@@ -605,8 +606,8 @@ def visualize_optimization(global_map: GridMap,
             sub_i, sub_j = decode_key(key)
             p_s = np.array([sub_i * submap_res, sub_j * submap_res, 0.0])
             p_w = pose[:3, :3] @ p_s + pose[:3, 3]
-            gi_glob = int(np.floor(p_w[0] / global_res))
-            gj_glob = int(np.floor(p_w[1] / global_res))
+            gi_glob = int(np.round(p_w[0] / global_res))
+            gj_glob = int(np.round(p_w[1] / global_res))
             if 0 <= gi_glob - global_map.min_i < grid.shape[0] and \
                0 <= gj_glob - global_map.min_j < grid.shape[1]:
                 grid[gi_glob - global_map.min_i, 
@@ -1012,8 +1013,8 @@ def multi_resolution_optimization(multi_res_submaps: dict,
                 n_particles=n_particles,
                 n_iterations=n_iterations,
                 visualize=True,  # 关闭粒子滤波实时可视化，避免干扰
-                # visualize=False,  # 关闭粒子滤波实时可视化，避免干扰
                 spread=(spread_x, spread_y, spread_theta),
+                submap_res=res,
                 global_res=res
             )
             print(f"粒子滤波优化完成，最终误差: {final_error:.6f}")
@@ -1113,6 +1114,7 @@ def multi_resolution_optimization(multi_res_submaps: dict,
                 n_iterations=250,
                 visualize=visualize,
                 spread=(spread_x, spread_y, spread_theta),
+                submap_res=0.1,
                 global_res=0.1
             )
             current_pose = optimized_pose
