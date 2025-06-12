@@ -327,11 +327,12 @@ def optimize_submap_pose(submap: GridMap,
 
         optimized_pose, final_error = match_submap_with_particle_filter(
             submap, global_map, init_pose,
-            n_particles=100, # 减少粒子数量
-            n_iterations=200, 
+            n_particles=100,
+            n_iterations=200,
             visualize=visualize,
-            spread=(spread_x_m, spread_y_m, spread_theta_rad), 
-            global_res=0.1 
+            spread=(spread_x_m, spread_y_m, spread_theta_rad),
+            submap_res=0.05,
+            global_res=0.1
         )
         return optimized_pose, final_error
     else:
@@ -1012,8 +1013,8 @@ def multi_resolution_optimization(multi_res_submaps: dict,
                 n_particles=n_particles,
                 n_iterations=n_iterations,
                 visualize=True,  # 关闭粒子滤波实时可视化，避免干扰
-                # visualize=False,  # 关闭粒子滤波实时可视化，避免干扰
                 spread=(spread_x, spread_y, spread_theta),
+                submap_res=res,
                 global_res=res
             )
             print(f"粒子滤波优化完成，最终误差: {final_error:.6f}")
@@ -1113,6 +1114,7 @@ def multi_resolution_optimization(multi_res_submaps: dict,
                 n_iterations=250,
                 visualize=visualize,
                 spread=(spread_x, spread_y, spread_theta),
+                submap_res=0.1,
                 global_res=0.1
             )
             current_pose = optimized_pose
