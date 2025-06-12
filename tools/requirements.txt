@@ -1,0 +1,4 @@
+# Python dependencies for map fusion tools
+numpy
+matplotlib
+scipy
