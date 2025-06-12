@@ -86,8 +86,8 @@ def compute_error_and_jacobian(pose_params: np.ndarray,
         p_w = R @ p_s + t
         
         # 计算全局地图栅格索引
-        gi_glob = int(np.floor(p_w[0] / global_res))
-        gj_glob = int(np.floor(p_w[1] / global_res))
+        gi_glob = int(np.round(p_w[0] / global_res))
+        gj_glob = int(np.round(p_w[1] / global_res))
         
         # 在7x7邻域内搜索最近的占用栅格
         min_dist = float('inf')
@@ -185,8 +185,8 @@ def transform_submap_to_size(submap: GridMap, pose: np.ndarray,
         p_w = pose[:3, :3] @ p_s + pose[:3, 3]
         
         # 转换到全局地图栅格坐标（使用全局地图分辨率）
-        gi_glob = int(np.floor(p_w[0] / global_res))
-        gj_glob = int(np.floor(p_w[1] / global_res))
+        gi_glob = int(np.round(p_w[0] / global_res))
+        gj_glob = int(np.round(p_w[1] / global_res))
         
         # 检查是否在目标尺寸范围内
         if 0 <= gi_glob < target_shape[0] and 0 <= gj_glob < target_shape[1]:
@@ -530,8 +530,8 @@ def compute_matching_error(submap: GridMap,
         p_w = pose[:3, :3] @ p_s + pose[:3, 3]
         
         # Convert to global map grid coordinates using global resolution
-        gi_glob = int(np.floor(p_w[0] / global_res))
-        gj_glob = int(np.floor(p_w[1] / global_res))
+        gi_glob = int(np.round(p_w[0] / global_res))
+        gj_glob = int(np.round(p_w[1] / global_res))
         
         # Check occupancy in global map
         key_glob = encode_key(gi_glob, gj_glob)
@@ -577,8 +577,8 @@ def transform_submap(submap: GridMap, pose: np.ndarray,
         p_w = pose[:3, :3] @ p_s + pose[:3, 3]
         
         # 转换到全局地图栅格坐标（使用全局地图分辨率）
-        gi_glob = int(np.floor(p_w[0] / global_res))
-        gj_glob = int(np.floor(p_w[1] / global_res))
+        gi_glob = int(np.round(p_w[0] / global_res))
+        gj_glob = int(np.round(p_w[1] / global_res))
         
         transformed.update_occ(gi_glob, gj_glob, p_sub)
     
@@ -606,8 +606,8 @@ def visualize_optimization(global_map: GridMap,
             sub_i, sub_j = decode_key(key)
             p_s = np.array([sub_i * submap_res, sub_j * submap_res, 0.0])
             p_w = pose[:3, :3] @ p_s + pose[:3, 3]
-            gi_glob = int(np.floor(p_w[0] / global_res))
-            gj_glob = int(np.floor(p_w[1] / global_res))
+            gi_glob = int(np.round(p_w[0] / global_res))
+            gj_glob = int(np.round(p_w[1] / global_res))
             if 0 <= gi_glob - global_map.min_i < grid.shape[0] and \
                0 <= gj_glob - global_map.min_j < grid.shape[1]:
                 grid[gi_glob - global_map.min_i, 

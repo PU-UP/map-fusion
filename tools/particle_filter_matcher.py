@@ -103,8 +103,8 @@ class ParticleFilter:
                 p_w = T[:3, :3] @ p_s + T[:3, 3]
                 
                 # Convert to global map grid coordinates
-                gi_glob = int(np.floor(p_w[0] / global_res))
-                gj_glob = int(np.floor(p_w[1] / global_res))
+                gi_glob = int(np.round(p_w[0] / global_res))
+                gj_glob = int(np.round(p_w[1] / global_res))
                 
                 # Check occupancy in global map
                 key_glob = encode_key(gi_glob, gj_glob)
@@ -322,8 +322,8 @@ def compute_matching_error(submap: 'GridMap',
         p_w = pose[:3, :3] @ p_s + pose[:3, 3]
         
         # Convert to global map grid coordinates
-        gi_glob = int(np.floor(p_w[0] / global_res))
-        gj_glob = int(np.floor(p_w[1] / global_res))
+        gi_glob = int(np.round(p_w[0] / global_res))
+        gj_glob = int(np.round(p_w[1] / global_res))
         
         # Check occupancy in global map
         key_glob = encode_key(gi_glob, gj_glob)
@@ -354,8 +354,8 @@ def transform_submap(submap: 'GridMap', pose: np.ndarray,
         p_w = pose[:3, :3] @ p_s + pose[:3, 3]
 
         # Convert to global map grid coordinates
-        gi_glob = int(np.floor(p_w[0] / global_res))
-        gj_glob = int(np.floor(p_w[1] / global_res))
+        gi_glob = int(np.round(p_w[0] / global_res))
+        gj_glob = int(np.round(p_w[1] / global_res))
 
         transformed.update_occ(gi_glob, gj_glob, p_sub)
 
