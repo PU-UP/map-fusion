@@ -28,6 +28,7 @@ from fuse_submaps import (
     visualize_map, add_noise_to_pose, downsample_map, ternarize_map
 )
 from particle_filter_matcher import ParticleFilter, encode_key, match_submap_with_particle_filter
+from xxx_match import match_submap_with_grid_correlation
 from typing import List, Tuple
 import glob
 import argparse
@@ -915,7 +916,8 @@ def multi_resolution_optimization(multi_res_submaps: dict,
                                 multi_res_global_maps: dict,
                                 init_pose: np.ndarray,
                                 true_pose: np.ndarray = None,
-                                visualize: bool = False) -> tuple:
+                                visualize: bool = False,
+                                use_grid_match: bool = False) -> tuple:
     """多分辨率位姿优化
     
     Args:
@@ -1006,18 +1008,32 @@ def multi_resolution_optimization(multi_res_submaps: dict,
         
         try:
             # 执行当前分辨率的优化
-            # 注意：这里关闭粒子滤波的实时可视化，改用层级完成后的中间结果可视化
-            print(f"开始粒子滤波优化...")
-            optimized_pose, final_error = match_submap_with_particle_filter(
-                submap, global_map, current_pose,
-                n_particles=n_particles,
-                n_iterations=n_iterations,
-                visualize=True,  # 关闭粒子滤波实时可视化，避免干扰
-                spread=(spread_x, spread_y, spread_theta),
-                submap_res=res,
-                global_res=res
-            )
-            print(f"粒子滤波优化完成，最终误差: {final_error:.6f}")
+            if use_grid_match:
+                print(f"开始栅格相关匹配...")
+                optimized_pose, final_error = match_submap_with_grid_correlation(
+                    submap,
+                    global_map,
+                    current_pose,
+                    search_range=spread_x,
+                    theta_range_deg=np.rad2deg(spread_theta),
+                    theta_step_deg=1.0,
+                    submap_res=res,
+                    global_res=res,
+                    visualize=False,
+                )
+                print(f"栅格匹配完成，最终误差: {final_error:.6f}")
+            else:
+                print(f"开始粒子滤波优化...")
+                optimized_pose, final_error = match_submap_with_particle_filter(
+                    submap, global_map, current_pose,
+                    n_particles=n_particles,
+                    n_iterations=n_iterations,
+                    visualize=True,  # 关闭粒子滤波实时可视化，避免干扰
+                    spread=(spread_x, spread_y, spread_theta),
+                    submap_res=res,
+                    global_res=res
+                )
+                print(f"粒子滤波优化完成，最终误差: {final_error:.6f}")
             
             # 显示优化后位姿信息
             opt_x, opt_y = optimized_pose[:2, 3]
@@ -1108,15 +1124,28 @@ def multi_resolution_optimization(multi_res_submaps: dict,
             spread_y *= 2
             spread_theta *= 2
             
-            optimized_pose, final_error = match_submap_with_particle_filter(
-                multi_res_submaps[0.1], multi_res_global_maps[0.1], current_pose,
-                n_particles=120,
-                n_iterations=250,
-                visualize=visualize,
-                spread=(spread_x, spread_y, spread_theta),
-                submap_res=0.1,
-                global_res=0.1
-            )
+            if use_grid_match:
+                optimized_pose, final_error = match_submap_with_grid_correlation(
+                    multi_res_submaps[0.1],
+                    multi_res_global_maps[0.1],
+                    current_pose,
+                    search_range=spread_x,
+                    theta_range_deg=np.rad2deg(spread_theta),
+                    theta_step_deg=1.0,
+                    submap_res=0.1,
+                    global_res=0.1,
+                    visualize=False,
+                )
+            else:
+                optimized_pose, final_error = match_submap_with_particle_filter(
+                    multi_res_submaps[0.1], multi_res_global_maps[0.1], current_pose,
+                    n_particles=120,
+                    n_iterations=250,
+                    visualize=visualize,
+                    spread=(spread_x, spread_y, spread_theta),
+                    submap_res=0.1,
+                    global_res=0.1
+                )
             current_pose = optimized_pose
         except Exception as e:
             print(f"强制优化也失败: {e}")
@@ -1163,8 +1192,9 @@ def main():
     parser.add_argument("--plot", action="store_true", help="显示粒子滤波中间过程的可视化")
     parser.add_argument("--use-gt", action="store_true", help="使用path_pg_rtk.txt中的真值作为初始位姿和参考真值")
     parser.add_argument("--submap", type=int, help="指定要优化的子图ID，默认为随机选择")
-    parser.add_argument("--multi-res", action="store_true", 
+    parser.add_argument("--multi-res", action="store_true",
                        help="使用多分辨率匹配策略：从低分辨率(1.6m)到高分辨率(0.1m)逐层优化，提高收敛效率和鲁棒性")
+    parser.add_argument("--xxx", action="store_true", help="使用栅格相关匹配算法")
     args = parser.parse_args()
 
     folder_path = args.folder_path
@@ -1172,6 +1202,7 @@ def main():
     use_gt = args.use_gt # 获取--use-gt参数的值
     specified_submap_id = args.submap # 获取--submap参数的值
     use_multi_res = args.multi_res # 获取--multi-res参数的值
+    use_xxx = args.xxx # 获取--xxx参数的值
 
     # 1. 加载全局地图（单分辨率或多分辨率）
     if use_multi_res:
@@ -1251,15 +1282,29 @@ def main():
         
         # 执行多分辨率优化
         opt_pose, error = multi_resolution_optimization(
-            multi_res_submaps, 
-            multi_res_global_maps, 
+            multi_res_submaps,
+            multi_res_global_maps,
             init_pose,
             true_pose,  # 传递真值位姿用于可视化
-            visualize=plot_intermediate
+            visualize=plot_intermediate,
+            use_grid_match=use_xxx
         )
     else:
         print("使用单分辨率优化...")
-        opt_pose, error = optimize_submap_pose(submap, global_map, init_pose, visualize=plot_intermediate)
+        if use_xxx:
+            opt_pose, error = match_submap_with_grid_correlation(
+                submap,
+                global_map,
+                init_pose,
+                search_range=1.0,
+                theta_range_deg=15.0,
+                theta_step_deg=1.0,
+                submap_res=0.05,
+                global_res=0.1,
+                visualize=plot_intermediate,
+            )
+        else:
+            opt_pose, error = optimize_submap_pose(submap, global_map, init_pose, visualize=plot_intermediate)
     
     print(f"优化完成，最终误差: {error:.6f}")
     
