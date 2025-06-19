@@ -15,6 +15,7 @@ import numpy as np
 import matplotlib.pyplot as plt
 import matplotlib as mpl
 import argparse
+from typing import Optional
 from scipy.spatial.transform import Rotation as R
 
 # 配置 matplotlib 支持中文显示
@@ -251,7 +252,7 @@ def visualize_map(occ_map: np.ndarray, p_free: float = 0.3, p_occ: float = 0.7):
     
     return vis
 
-def fuse_submaps(folder_path: str, save_path: str = None, use_gt: bool = False, gt_poses: dict = None, global_res: float = 0.1):
+def fuse_submaps(folder_path: str, save_path: Optional[str] = None, use_gt: bool = False, gt_poses: Optional[dict] = None, global_res: float = 0.1):
     """融合所有子图"""
     # 创建全局地图
     global_map = GridMap()
