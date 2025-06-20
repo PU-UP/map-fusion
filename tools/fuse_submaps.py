@@ -428,7 +428,8 @@ def main():
         
         # 生成最高分辨率地图
         base_save_path = os.path.join(folder_path, 'global_map_01')
-        high_res_map, _ = fuse_submaps(folder_path, base_save_path, args.use_gt, gt_poses, 0.1)
+        # 先生成最高分辨率地图，稍后再统一保存
+        high_res_map, _ = fuse_submaps(folder_path, None, args.use_gt, gt_poses, 0.1)
         
         if high_res_map is None:
             print("错误：无法生成基础高分辨率地图")
@@ -457,7 +458,8 @@ def main():
     else:
         # 单分辨率模式
         save_path = os.path.join(folder_path, args.save) if args.save else None
-        global_map, _ = fuse_submaps(folder_path, save_path, args.use_gt, gt_poses)
+        # 仅生成地图，保存操作在下方统一处理
+        global_map, _ = fuse_submaps(folder_path, None, args.use_gt, gt_poses)
         
         if global_map:
             if save_path:
@@ -469,4 +471,4 @@ def main():
             display_map_with_info(global_map, '全局地图', 0.1)
 
 if __name__ == '__main__':
-    main() 
+    main()
