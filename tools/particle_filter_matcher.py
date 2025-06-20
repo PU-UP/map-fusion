@@ -79,34 +79,32 @@ class ParticleFilter:
         """Update particle weights based on map matching score"""
         total_weight = 0.0
 
+        if occupied_cells.size == 0:
+            return
+
+        occ_points = occupied_cells
+
         for particle in self.particles:
-            T = particle.to_matrix()
-            score = 0
-            count = 0
+            c, s = np.cos(particle.theta), np.sin(particle.theta)
+            rot = np.array([[c, -s], [s, c]])
+            trans = np.array([particle.x, particle.y])
 
-            for cell in occupied_cells:
-                p_s = np.array([cell[0], cell[1], 0.0])
-                p_w = T[:3, :3] @ p_s + T[:3, 3]
+            world_pts = occ_points @ rot.T + trans
 
-                gi_glob = int(np.round(p_w[0] / global_res))
-                gj_glob = int(np.round(p_w[1] / global_res))
-                key_glob = encode_key(gi_glob, gj_glob)
+            gi = np.round(world_pts[:, 0] / global_res).astype(np.int64)
+            gj = np.round(world_pts[:, 1] / global_res).astype(np.int64)
 
-                p_glob_binary = 0.0
-                if key_glob in global_map.occ_map:
-                    p_glob_raw = global_map.occ_map[key_glob]
-                    p_glob_binary = 1.0 if p_glob_raw > 0.6 else 0.0
+            keys = (gi.astype(np.int64) << 32) | (gj.astype(np.int64) & 0xFFFFFFFF)
+            probs = np.array([global_map.occ_map.get(int(k), 0.0) for k in keys])
 
-                diff = abs(p_glob_binary - 1.0)
-                score += diff
-                count += 1
-            
-            if count > 0:
-                avg_score = score / count
-                weight = np.exp(-avg_score / self.measurement_noise)
-                particle.weight = weight
-                total_weight += weight
-        
+            p_binary = np.where(probs > 0.6, 1.0, 0.0)
+            diff = np.abs(p_binary - 1.0)
+
+            avg_score = diff.mean() if diff.size > 0 else 1.0
+            weight = np.exp(-avg_score / self.measurement_noise)
+            particle.weight = weight
+            total_weight += weight
+
         # Normalize weights
         if total_weight > 0:
             for p in self.particles:
@@ -180,6 +178,7 @@ def match_submap_with_particle_filter(submap: 'GridMap',
         plt.ion()
         fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(20, 10))
         fig.suptitle('Particle Filter Map Matching')
+        global_grid_vis = global_map.to_matrix()
     
     best_pose = init_pose.copy()
     min_error = float('inf')
@@ -223,10 +222,9 @@ def match_submap_with_particle_filter(submap: 'GridMap',
         if visualize and iter % 5 == 0:
             ax1.clear()
             ax2.clear()
-            
+
             # Plot global map
-            global_grid = global_map.to_matrix()
-            ax1.imshow(global_grid, cmap='gray', origin='upper')
+            ax1.imshow(global_grid_vis, cmap='gray', origin='upper')
             
             # Plot particles
             particle_matrix_cols = [(p.y / global_res) - global_map.min_j for p in pf.particles]
@@ -257,23 +255,26 @@ def compute_matching_error(occupied_cells: np.ndarray,
                          pose: np.ndarray,
                          global_res: float = 0.1) -> float:
     """Compute matching error between submap and global map"""
-    total_error = 0
-    count = 0
+    if occupied_cells.size == 0:
+        return 0.0
 
-    for cell in occupied_cells:
-        p_s = np.array([cell[0], cell[1], 0.0])
-        p_w = pose[:3, :3] @ p_s + pose[:3, 3]
+    c, s = pose[0, 0], pose[1, 0]
+    rot = np.array([[c, -s], [s, c]])
+    trans = pose[:2, 3]
 
-        gi_glob = int(np.round(p_w[0] / global_res))
-        gj_glob = int(np.round(p_w[1] / global_res))
+    world_pts = occupied_cells @ rot.T + trans
 
-        key_glob = encode_key(gi_glob, gj_glob)
-        if key_glob in global_map.occ_map:
-            p_glob = global_map.occ_map[key_glob]
-            total_error += abs(p_glob - 1.0)
-            count += 1
+    gi = np.round(world_pts[:, 0] / global_res).astype(np.int64)
+    gj = np.round(world_pts[:, 1] / global_res).astype(np.int64)
 
-    return total_error / max(count, 1)
+    keys = (gi.astype(np.int64) << 32) | (gj.astype(np.int64) & 0xFFFFFFFF)
+    probs = np.array([global_map.occ_map.get(int(k), 0.0) for k in keys])
+
+    valid = probs > -1  # all entries valid, keep for consistency
+    if np.any(valid):
+        errors = np.abs(probs[valid] - 1.0)
+        return errors.mean()
+    return 0.0
 
 def transform_submap(submap: 'GridMap', pose: np.ndarray,
                      submap_res: float = 0.05,
