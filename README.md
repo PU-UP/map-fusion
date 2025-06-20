@@ -45,3 +45,12 @@ python tools/fuse_submaps.py --folder data/submap_200_visual --save fused
 
 The script will create `fused.bin` and `fused.png` in the same folder showing the combined map.
 
+### 默认调试选项
+为了快速开始调试和测试匹配功能，建议优先使用以下命令：
+
+```bash
+python .\tools\optimize_submap.py ..\data\submap_200_visual\ --use-gt --submap 18 --multi-res
+```
+
+这个命令使用真实轨迹（ground truth）数据，针对第18个子地图进行多分辨率优化匹配，是推荐的默认调试选项。
+
