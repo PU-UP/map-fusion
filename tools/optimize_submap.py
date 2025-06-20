@@ -35,6 +35,14 @@ from io import StringIO
 plt.rcParams['font.sans-serif'] = ['SimHei']
 plt.rcParams['axes.unicode_minus'] = False
 
+EPS = 1e-3
+
+def cross_entropy(p_true: np.ndarray, p_pred: np.ndarray, eps: float = EPS) -> np.ndarray:
+    """Element-wise cross entropy between two probability arrays."""
+    p_true = np.clip(p_true, eps, 1.0 - eps)
+    p_pred = np.clip(p_pred, eps, 1.0 - eps)
+    return -(p_true * np.log(p_pred) + (1.0 - p_true) * np.log(1.0 - p_pred))
+
 def optimize_submap_pose(submap: GridMap, 
                         global_map: GridMap,
                         init_pose: np.ndarray,
@@ -78,10 +86,10 @@ def compute_matching_error(submap: GridMap,
         key_glob = encode_key(gi_glob, gj_glob)
         
         p_glob = global_map.occ_map.get(key_glob, 0.5)
-        diff = p_glob - p_cell
-        if abs(diff) < 0.4:
+        if abs(p_glob - p_cell) < 0.4:
             matched_count += 1
-        total_error += diff * diff
+        ce = cross_entropy(np.array([p_cell]), np.array([p_glob]))[0]
+        total_error += ce
 
         count += 1
     

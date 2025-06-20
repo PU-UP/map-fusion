@@ -8,6 +8,14 @@ import matplotlib as mpl
 mpl.rcParams['font.sans-serif'] = ['SimHei']
 mpl.rcParams['axes.unicode_minus'] = False
 
+EPS = 1e-3
+
+def cross_entropy(p_true: np.ndarray, p_pred: np.ndarray, eps: float = EPS) -> np.ndarray:
+    """Compute element-wise cross entropy between two probability arrays."""
+    p_true = np.clip(p_true, eps, 1.0 - eps)
+    p_pred = np.clip(p_pred, eps, 1.0 - eps)
+    return -(p_true * np.log(p_pred) + (1.0 - p_true) * np.log(1.0 - p_pred))
+
 def extract_occupied_cells(submap: GridMap, res: float) -> np.ndarray:
     """Return (N,3) array of world coordinates and probabilities."""
     cells = []
@@ -98,8 +106,8 @@ class ParticleFilter:
             keys = (gi.astype(np.int64) << 32) | (gj.astype(np.int64) & 0xFFFFFFFF)
             probs = np.array([global_map.occ_map.get(int(k), 0.5) for k in keys])
 
-            diff = (probs - occ_probs) ** 2
-            avg_score = diff.mean() if diff.size > 0 else 1.0
+            ce = cross_entropy(occ_probs, probs)
+            avg_score = ce.mean() if ce.size > 0 else 1.0
             weight = np.exp(-avg_score / self.measurement_noise)
             particle.weight = weight
             total_weight += weight
@@ -272,7 +280,7 @@ def compute_matching_error(occupied_cells: np.ndarray,
     keys = (gi.astype(np.int64) << 32) | (gj.astype(np.int64) & 0xFFFFFFFF)
     probs = np.array([global_map.occ_map.get(int(k), 0.5) for k in keys])
 
-    errors = (probs - probs_sub) ** 2
+    errors = cross_entropy(probs_sub, probs)
     return errors.mean() if errors.size > 0 else 0.0
 
 def transform_submap(submap: 'GridMap', pose: np.ndarray,
