@@ -3,6 +3,7 @@ from typing import List, Tuple
 import matplotlib.pyplot as plt
 from fuse_submaps import GridMap, decode_key, encode_key
 import matplotlib as mpl
+import time
 
 # 配置 matplotlib 支持中文显示
 mpl.rcParams['font.sans-serif'] = ['SimHei']
@@ -159,7 +160,8 @@ def match_submap_with_particle_filter(submap: 'GridMap',
                                     visualize: bool = True,
                                     spread: Tuple[float, float, float] = (0.5, 0.5, np.pi/6),
                                     submap_res: float = 0.05,
-                                    global_res: float = 0.1) -> Tuple[np.ndarray, float]:
+                                    global_res: float = 0.1,
+                                    debug: bool = False) -> Tuple[np.ndarray, float]:
     """Match submap to global map using particle filter"""
     
     # Initialize particle filter
@@ -187,7 +189,20 @@ def match_submap_with_particle_filter(submap: 'GridMap',
     error_tolerance = 0.001
     no_improvement_count = 0
     
+    # 耗时检测相关变量
+    timing_start_iter = 5  # 从第5次迭代开始计时
+    iteration_times = []
+    total_timing_time = 0.0
+    
+    # 误差变化记录（用于debug模式下的绘图）
+    error_history = []
+    iteration_history = []
+    
     for iter in range(n_iterations):
+        # 开始计时（从第5次迭代开始）
+        if iter >= timing_start_iter:
+            iter_start_time = time.time()
+        
         # Predict (random walk for exploration)
         pf.predict(np.eye(4))
 
@@ -200,6 +215,11 @@ def match_submap_with_particle_filter(submap: 'GridMap',
         # Calculate current error
         error = compute_matching_error(occupied_cells, global_map, current_pose, global_res=global_res)
         
+        # 记录误差历史（用于debug模式）
+        if debug:
+            error_history.append(error)
+            iteration_history.append(iter)
+        
         # Update best pose if needed
         if error < min_error:
             if min_error - error > error_tolerance:
@@ -211,6 +231,18 @@ def match_submap_with_particle_filter(submap: 'GridMap',
             print(f"Iteration {iter}: New best pose found, error = {error:.3f}")
         else:
             no_improvement_count += 1
+        
+        # 计算并记录耗时（从第5次迭代开始）
+        if iter >= timing_start_iter:
+            iter_end_time = time.time()
+            iter_time = iter_end_time - iter_start_time
+            iteration_times.append(iter_time)
+            total_timing_time += iter_time
+            
+            # 显示耗时信息（仅在debug模式下）
+            if debug and (iter % 10 == 0 or iter == n_iterations - 1):  # 每10次迭代显示一次，或最后一次
+                avg_time = total_timing_time / len(iteration_times)
+                print(f"迭代 {iter}: 耗时 {iter_time:.4f}s, 平均耗时 {avg_time:.4f}s")
         
         if no_improvement_count >= no_improvement_threshold:
             print(
@@ -244,11 +276,47 @@ def match_submap_with_particle_filter(submap: 'GridMap',
         # Resample particles
         pf.resample()
     
+    # 显示总体耗时统计（仅在debug模式下）
+    if debug and iteration_times:
+        total_iterations = len(iteration_times)
+        total_time = sum(iteration_times)
+        avg_time = total_time / total_iterations
+        min_time = min(iteration_times)
+        max_time = max(iteration_times)
+        
+        print(f"\n========== 耗时统计 (从第{timing_start_iter}次迭代开始) ==========")
+        print(f"总迭代次数: {total_iterations}")
+        print(f"总耗时: {total_time:.4f}s")
+        print(f"平均耗时: {avg_time:.4f}s")
+        print(f"最快耗时: {min_time:.4f}s")
+        print(f"最慢耗时: {max_time:.4f}s")
+    
     if visualize:
         plt.ioff()
         plt.close(fig)
 
-    return best_pose, min_error
+    result = (best_pose, min_error)
+
+    # 绘制误差变化图（仅在debug模式下，且不计入耗时）
+    if debug and error_history:
+        plt.figure(figsize=(12, 8))
+        plt.plot(iteration_history, error_history, 'b-', linewidth=2, label='匹配误差')
+        plt.xlabel('迭代次数')
+        plt.ylabel('匹配误差')
+        plt.title('粒子滤波优化过程中的误差变化')
+        plt.grid(True, alpha=0.3)
+        plt.legend()
+        
+        # 标记最佳误差点
+        min_error_idx = np.argmin(error_history)
+        plt.plot(iteration_history[min_error_idx], error_history[min_error_idx], 'ro', 
+                markersize=10, label=f'最佳误差: {error_history[min_error_idx]:.4f}')
+        plt.legend()
+        
+        plt.tight_layout()
+        plt.show()
+
+    return result
 
 def compute_matching_error(occupied_cells: np.ndarray,
                          global_map: 'GridMap',

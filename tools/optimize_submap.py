@@ -30,6 +30,7 @@ from matplotlib.gridspec import GridSpec
 from matplotlib.patches import Rectangle
 from scipy.spatial.transform import Rotation as R
 from io import StringIO
+import time
 
 # 设置matplotlib中文字体
 plt.rcParams['font.sans-serif'] = ['SimHei']
@@ -38,9 +39,13 @@ plt.rcParams['axes.unicode_minus'] = False
 def optimize_submap_pose(submap: GridMap, 
                         global_map: GridMap,
                         init_pose: np.ndarray,
-                        visualize: bool = False) -> tuple:
+                        visualize: bool = False,
+                        debug: bool = False) -> tuple:
     """使用粒子滤波优化子图位姿"""
     print("使用粒子滤波进行优化...")
+    
+    # 开始计时
+    start_time = time.time()
     
     optimized_pose, final_error = match_submap_with_particle_filter(
         submap, global_map, init_pose,
@@ -49,8 +54,19 @@ def optimize_submap_pose(submap: GridMap,
         visualize=visualize,
         spread=(1.0, 1.0, np.deg2rad(15.0)),
         submap_res=0.05,
-        global_res=0.1
+        global_res=0.1,
+        debug=debug
     )
+    
+    # 结束计时
+    end_time = time.time()
+    total_time = end_time - start_time
+    
+    if debug:
+        print(f"单分辨率优化总耗时: {total_time:.4f}s")
+    else:
+        print(f"优化耗时: {total_time:.4f}s")
+    
     return optimized_pose, final_error
 
 def compute_matching_error(submap: GridMap,
@@ -281,7 +297,8 @@ def multi_resolution_optimization(multi_res_submaps: dict,
                                 multi_res_global_maps: dict,
                                 init_pose: np.ndarray,
                                 true_pose: Optional[np.ndarray] = None,
-                                visualize: bool = False) -> tuple:
+                                visualize: bool = False,
+                                debug: bool = False) -> tuple:
     """多分辨率位姿优化"""
     resolutions = [1.6, 0.8, 0.4, 0.2, 0.1]
     current_pose = init_pose.copy()
@@ -298,12 +315,16 @@ def multi_resolution_optimization(multi_res_submaps: dict,
     }
     
     successful_optimizations = 0
+    resolution_times = {}  # 记录每个分辨率的耗时
     
     for res in resolutions:
         if res not in multi_res_submaps or res not in multi_res_global_maps:
             continue
         
         print(f"\n===== 分辨率 {res}m 优化 =====")
+        
+        # 开始计时
+        res_start_time = time.time()
         
         submap = multi_res_submaps[res]
         global_map = multi_res_global_maps[res]
@@ -321,7 +342,7 @@ def multi_resolution_optimization(multi_res_submaps: dict,
         n_iterations = config['iterations']
         
         initial_error = compute_matching_error(submap, global_map, current_pose, 
-                                             submap_res=res, global_res=res, debug=True)
+                                             submap_res=res, global_res=res, debug=debug)
         
         try:
             optimized_pose, final_error = match_submap_with_particle_filter(
@@ -331,7 +352,8 @@ def multi_resolution_optimization(multi_res_submaps: dict,
                 visualize=visualize and res <= 0.2,  # 只在高分辨率层显示可视化
                 spread=(spread_x, spread_y, spread_theta),
                 submap_res=res,
-                global_res=res
+                global_res=res,
+                debug=debug
             )
             
             pose_diff = np.linalg.norm(optimized_pose[:2, 3] - current_pose[:2, 3])
@@ -352,6 +374,14 @@ def multi_resolution_optimization(multi_res_submaps: dict,
                 
         except Exception as e:
             print(f"分辨率 {res}m 优化失败: {e}")
+        
+        # 结束计时并记录
+        res_end_time = time.time()
+        res_time = res_end_time - res_start_time
+        resolution_times[res] = res_time
+        
+        if debug:
+            print(f"分辨率 {res}m 优化耗时: {res_time:.4f}s")
     
     # 计算最终误差
     final_error = 0.0
@@ -368,6 +398,17 @@ def multi_resolution_optimization(multi_res_submaps: dict,
     print(f"成功优化层数: {successful_optimizations}")
     print(f"最终误差: {final_error:.6f}")
     
+    # 显示各分辨率层耗时统计
+    if resolution_times:
+        total_time = sum(resolution_times.values())
+        if debug:
+            print(f"\n========== 各分辨率层耗时统计 ==========")
+            for res in resolutions:
+                if res in resolution_times:
+                    time_percent = (resolution_times[res] / total_time) * 100
+                    print(f"分辨率 {res}m: {resolution_times[res]:.4f}s ({time_percent:.1f}%)")
+        print(f"总耗时: {total_time:.4f}s")
+    
     return current_pose, final_error
 
 def main():
@@ -378,6 +419,7 @@ def main():
     parser.add_argument("--submap", type=int, help="指定要优化的子图ID，默认为随机选择")
     parser.add_argument("--multi-res", action="store_true",
                        help="使用多分辨率匹配策略：从低分辨率到高分辨率逐层优化")
+    parser.add_argument("--debug", action="store_true", help="开启调试模式：详细耗时打印和误差变化图")
     args = parser.parse_args()
 
     if not os.path.isdir(args.folder_path):
@@ -454,14 +496,16 @@ def main():
             multi_res_global_maps, 
             init_pose,
             true_pose,
-            visualize=args.plot
+            visualize=args.plot,
+            debug=args.debug
         )
         final_submap = multi_res_submaps[0.1] if 0.1 in multi_res_submaps else submap
         visualize_optimization(global_map, final_submap, true_pose, init_pose, opt_pose, 
                              None, submap_id, submap_res=0.1, global_res=0.1)
     else:
         print("使用单分辨率优化...")
-        opt_pose, error = optimize_submap_pose(submap, global_map, init_pose, visualize=args.plot)
+        opt_pose, error = optimize_submap_pose(submap, global_map, init_pose, 
+                                              visualize=args.plot, debug=args.debug)
         visualize_optimization(global_map, submap, true_pose, init_pose, opt_pose, 
                              None, submap_id, submap_res=0.05, global_res=0.1)
     
