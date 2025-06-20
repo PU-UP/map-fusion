@@ -211,22 +211,26 @@ def read_gt_poses(folder_path: str) -> dict:
     return gt_poses
 
 def visualize_map(occ_map: np.ndarray) -> np.ndarray:
-    """可视化占用栅格地图"""
-    vis = np.zeros((*occ_map.shape, 3), dtype=np.uint8)
-    
-    # 空闲区域显示为白色
-    free_mask = np.isclose(occ_map, 0.0, rtol=1e-5)
-    vis[free_mask] = [255, 255, 255]
-    
-    # 占用区域显示为黑色
-    occ_mask = np.isclose(occ_map, 1.0, rtol=1e-5)
-    vis[occ_mask] = [0, 0, 0]
-    
-    # 未知区域显示为灰色
-    unknown_mask = ~(free_mask | occ_mask)
-    vis[unknown_mask] = [128, 128, 128]
-    
-    return vis
+    """可视化占用栅格地图，若地图包含连续概率则按灰度显示"""
+    discrete_values = {0.0, 0.5, 1.0}
+    unique_vals = set(np.unique(occ_map))
+
+    if unique_vals.issubset(discrete_values):
+        vis = np.zeros((*occ_map.shape, 3), dtype=np.uint8)
+
+        free_mask = np.isclose(occ_map, 0.0, rtol=1e-5)
+        vis[free_mask] = [255, 255, 255]
+
+        occ_mask = np.isclose(occ_map, 1.0, rtol=1e-5)
+        vis[occ_mask] = [0, 0, 0]
+
+        unknown_mask = ~(free_mask | occ_mask)
+        vis[unknown_mask] = [128, 128, 128]
+        return vis
+
+    gray = np.clip(1.0 - occ_map, 0.0, 1.0)
+    gray_img = (gray * 255).astype(np.uint8)
+    return np.stack([gray_img]*3, axis=-1)
 
 def fuse_submaps(folder_path: str, save_path: Optional[str] = None, 
                 use_gt: bool = False, gt_poses: Optional[dict] = None, 
@@ -338,45 +342,20 @@ def load_global_map(load_path: str) -> GridMap:
     return global_map
 
 def downsample_map(high_res_map: GridMap, high_res: float, low_res: float) -> GridMap:
-    """将高分辨率地图降采样为低分辨率地图"""
+    """将高分辨率地图降采样为低分辨率地图，保持概率信息"""
     low_res_map = GridMap()
-    
+
     print(f"降采样：从 {high_res}m 到 {low_res}m")
-    
-    # 三值化高分辨率地图
-    ternarized_map = {}
+
     for key, prob in high_res_map.occ_map.items():
-        ternarized_map[key] = ternarize_probability(prob)
-    
-    # 按低分辨率栅格分组
-    low_res_groups = {}
-    for key, ternary_prob in ternarized_map.items():
         gi, gj = decode_key(key)
         x, y = gi * high_res, gj * high_res
-        
+
         low_gi = int(np.round(x / low_res))
         low_gj = int(np.round(y / low_res))
-        low_key = encode_key(low_gi, low_gj)
-        
-        if low_key not in low_res_groups:
-            low_res_groups[low_key] = []
-        low_res_groups[low_key].append(ternary_prob)
-    
-    # 应用融合规则
-    for low_key, probs in low_res_groups.items():
-        occupied_count = sum(1 for p in probs if p == 1.0)
-        free_count = sum(1 for p in probs if p == 0.0)
-        
-        if occupied_count > 0:
-            final_prob = 1.0
-        elif free_count > 0:
-            final_prob = 0.0
-        else:
-            final_prob = 0.5
-        
-        low_gi, low_gj = decode_key(low_key)
-        low_res_map.set_occ_direct(low_gi, low_gj, final_prob)
-    
+
+        low_res_map.update_occ(low_gi, low_gj, prob)
+
     print(f"降采样完成，栅格数量: {len(low_res_map.occ_map)}")
     return low_res_map
 
@@ -455,14 +434,13 @@ def main():
             print("错误：无法生成基础高分辨率地图")
             return
         
-        # 三值化并保存
-        high_res_map = ternarize_map(high_res_map)
+        # 保存概率地图
         save_global_map(high_res_map, base_save_path + '.bin')
         grid = high_res_map.to_matrix()
         vis = visualize_map(grid)
         plt.imsave(base_save_path + '.png', vis, cmap='gray')
-        
-        display_map_with_info(high_res_map, '全局地图 - 分辨率: 0.1m (三值化)', 0.1)
+
+        display_map_with_info(high_res_map, '全局地图 - 分辨率: 0.1m', 0.1)
         
         # 生成其他分辨率
         for res, name in zip(resolutions[1:], resolution_names[1:]):
@@ -474,7 +452,7 @@ def main():
             grid = low_res_map.to_matrix()
             vis = visualize_map(grid)
             plt.imsave(save_path + '.png', vis, cmap='gray')
-            
+
             display_map_with_info(low_res_map, f'全局地图 - 分辨率: {res}m', res)
     else:
         # 单分辨率模式
@@ -482,15 +460,13 @@ def main():
         global_map, _ = fuse_submaps(folder_path, save_path, args.use_gt, gt_poses)
         
         if global_map:
-            global_map = ternarize_map(global_map)
-            
             if save_path:
                 save_global_map(global_map, save_path + '.bin')
                 grid = global_map.to_matrix()
                 vis = visualize_map(grid)
                 plt.imsave(save_path + '.png', vis, cmap='gray')
-            
-            display_map_with_info(global_map, '全局地图 (三值化)', 0.1)
+
+            display_map_with_info(global_map, '全局地图', 0.1)
 
 if __name__ == '__main__':
     main() 
