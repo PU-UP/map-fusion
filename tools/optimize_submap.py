@@ -244,13 +244,23 @@ def load_gt_pose_from_file(gt_file_path: str, timestamp: float) -> Optional[np.n
     
     return None
 
-def load_multi_resolution_global_maps(folder_path: str) -> dict:
+def load_multi_resolution_global_maps(folder_path: str, num_layers: int = 5) -> dict:
     """加载多分辨率全局地图"""
-    resolutions = [0.1, 0.2, 0.4, 0.8, 1.6]
-    resolution_names = ['01', '02', '04', '08', '16']
+    # 所有可能的分辨率，从粗到细
+    all_resolutions = [1.6, 0.8, 0.4, 0.2, 0.1]
+    all_resolution_names = ['16', '08', '04', '02', '01']
+    
+    # 根据指定层数选择分辨率
+    if num_layers > len(all_resolutions):
+        print(f"警告：请求的层数 {num_layers} 超过可用层数 {len(all_resolutions)}，使用单层地图匹配")
+        return {}
+    
+    # 选择最细的指定层数分辨率（从后往前选择）
+    resolutions = all_resolutions[-num_layers:]
+    resolution_names = all_resolution_names[-num_layers:]
     global_maps = {}
     
-    print("加载多分辨率全局地图...")
+    print(f"加载 {num_layers} 层多分辨率全局地图...")
     
     for res, name in zip(resolutions, resolution_names):
         map_path = os.path.join(folder_path, f'global_map_{name}.bin')
@@ -269,12 +279,21 @@ def load_multi_resolution_global_maps(folder_path: str) -> dict:
     
     return global_maps
 
-def generate_multi_resolution_submap(submap: GridMap, use_likelihood: bool = False) -> dict:
+def generate_multi_resolution_submap(submap: GridMap, use_likelihood: bool = False, num_layers: int = 5) -> dict:
     """生成多分辨率子图"""
-    resolutions = [0.1, 0.2, 0.4, 0.8, 1.6]
+    # 所有可能的分辨率，从粗到细
+    all_resolutions = [1.6, 0.8, 0.4, 0.2, 0.1]
+    
+    # 根据指定层数选择分辨率
+    if num_layers > len(all_resolutions):
+        print(f"警告：请求的层数 {num_layers} 超过可用层数 {len(all_resolutions)}，使用单层地图匹配")
+        return {}
+    
+    # 选择最细的指定层数分辨率（从后往前选择）
+    resolutions = all_resolutions[-num_layers:]
     submaps = {}
     
-    print("生成多分辨率子图...")
+    print(f"生成 {num_layers} 层多分辨率子图...")
     
     # 临时重定向输出保持界面清洁
     old_stdout = sys.stdout
@@ -311,12 +330,13 @@ def multi_resolution_optimization(multi_res_submaps: dict,
                                 visualize: bool = False,
                                 debug: bool = False) -> tuple:
     """多分辨率位姿优化"""
-    resolutions = [1.6, 0.8, 0.4, 0.2, 0.1]
+    # 获取可用的分辨率列表，从粗到细排序
+    available_resolutions = sorted(multi_res_submaps.keys(), reverse=True)
     current_pose = init_pose.copy()
     
     print("开始多分辨率优化...")
     
-    # 参数配置
+    # 参数配置 - 根据可用分辨率动态调整
     param_config = {
         1.6: {'spread': (4.0, 4.0, np.deg2rad(30.0)), 'particles': 80, 'iterations': 80},
         0.8: {'spread': (2.0, 2.0, np.deg2rad(15.0)), 'particles': 100, 'iterations': 100},
@@ -328,8 +348,8 @@ def multi_resolution_optimization(multi_res_submaps: dict,
     successful_optimizations = 0
     resolution_times = {}  # 记录每个分辨率的耗时
     
-    for res in resolutions:
-        if res not in multi_res_submaps or res not in multi_res_global_maps:
+    for res in available_resolutions:
+        if res not in multi_res_global_maps:
             continue
         
         print(f"\n===== 分辨率 {res}m 优化 =====")
@@ -347,7 +367,8 @@ def multi_resolution_optimization(multi_res_submaps: dict,
             print(f"跳过分辨率 {res}m (占用比例不合理或无占用栅格)")
             continue
 
-        config = param_config[res]
+        # 获取参数配置，如果不存在则使用默认值
+        config = param_config.get(res, {'spread': (1.0, 1.0, np.deg2rad(15.0)), 'particles': 100, 'iterations': 150})
         spread_x, spread_y, spread_theta = config['spread']
         n_particles = config['particles']
         n_iterations = config['iterations']
@@ -394,15 +415,16 @@ def multi_resolution_optimization(multi_res_submaps: dict,
         if debug:
             print(f"分辨率 {res}m 优化耗时: {res_time:.4f}s")
     
-    # 计算最终误差
+    # 计算最终误差 - 使用最高分辨率
     final_error = 0.0
-    if 0.1 in multi_res_submaps and 0.1 in multi_res_global_maps:
+    highest_res = min(multi_res_submaps.keys()) if multi_res_submaps else 0.1
+    if highest_res in multi_res_submaps and highest_res in multi_res_global_maps:
         final_error = compute_matching_error(
-            multi_res_submaps[0.1], 
-            multi_res_global_maps[0.1], 
+            multi_res_submaps[highest_res], 
+            multi_res_global_maps[highest_res], 
             current_pose,
-            submap_res=0.1,
-            global_res=0.1
+            submap_res=highest_res,
+            global_res=highest_res
         )
     
     print(f"\n========== 多分辨率优化总结 ==========")
@@ -414,7 +436,7 @@ def multi_resolution_optimization(multi_res_submaps: dict,
         total_time = sum(resolution_times.values())
         if debug:
             print(f"\n========== 各分辨率层耗时统计 ==========")
-            for res in resolutions:
+            for res in available_resolutions:
                 if res in resolution_times:
                     time_percent = (resolution_times[res] / total_time) * 100
                     print(f"分辨率 {res}m: {resolution_times[res]:.4f}s ({time_percent:.1f}%)")
@@ -651,12 +673,13 @@ def multi_resolution_likelihood_optimization(multi_res_submaps: dict,
                                            method: str = 'Nelder-Mead',
                                            n_candidates: int = 3) -> tuple:
     """多分辨率似然优化 - 支持多候选位姿策略"""
-    resolutions = [1.6, 0.8, 0.4, 0.2, 0.1]
+    # 获取可用的分辨率列表，从粗到细排序
+    available_resolutions = sorted(multi_res_submaps.keys(), reverse=True)
     current_candidates = [(init_pose.copy(), 0.0)]  # (pose, score)
     
     print("开始多分辨率似然优化...")
     
-    # 参数配置 - 增加迭代次数和降低容差
+    # 参数配置 - 根据可用分辨率动态调整
     param_config = {
         1.6: {'max_iter': 100, 'tolerance': 1e-8},
         0.8: {'max_iter': 150, 'tolerance': 1e-8},
@@ -669,8 +692,8 @@ def multi_resolution_likelihood_optimization(multi_res_submaps: dict,
     resolution_times = {}
     score_history = {}
     
-    for res_idx, res in enumerate(resolutions):
-        if res not in multi_res_submaps or res not in multi_res_global_maps:
+    for res_idx, res in enumerate(available_resolutions):
+        if res not in multi_res_global_maps:
             continue
         
         print(f"\n===== 分辨率 {res}m 似然优化 =====")
@@ -689,7 +712,8 @@ def multi_resolution_likelihood_optimization(multi_res_submaps: dict,
             print(f"跳过分辨率 {res}m (有效栅格太少)")
             continue
         
-        config = param_config[res]
+        # 获取参数配置，如果不存在则使用默认值
+        config = param_config.get(res, {'max_iter': 200, 'tolerance': 1e-8})
         max_iter = config['max_iter']
         tolerance = config['tolerance']
         
@@ -794,15 +818,16 @@ def multi_resolution_likelihood_optimization(multi_res_submaps: dict,
     final_pose = current_candidates[0][0]
     final_score = current_candidates[0][1]
     
-    # 计算最终误差（使用三值化方式计算匹配误差）
+    # 计算最终误差（使用三值化方式计算匹配误差）- 使用最高分辨率
     final_error = 0.0
-    if 0.1 in multi_res_submaps and 0.1 in multi_res_global_maps:
+    highest_res = min(multi_res_submaps.keys()) if multi_res_submaps else 0.1
+    if highest_res in multi_res_submaps and highest_res in multi_res_global_maps:
         final_error = compute_matching_error(
-            multi_res_submaps[0.1], 
-            multi_res_global_maps[0.1], 
+            multi_res_submaps[highest_res], 
+            multi_res_global_maps[highest_res], 
             final_pose,
-            submap_res=0.1,
-            global_res=0.1
+            submap_res=highest_res,
+            global_res=highest_res
         )
     
     print(f"\n========== 多分辨率似然优化总结 ==========")
@@ -811,7 +836,7 @@ def multi_resolution_likelihood_optimization(multi_res_submaps: dict,
     
     if debug and score_history:
         print(f"\n========== 各分辨率层似然分数变化 ==========")
-        for res in resolutions:
+        for res in available_resolutions:
             if res in score_history:
                 init_score, final_score = score_history[res]
                 improvement = (init_score - final_score) / max(init_score, 1e-6) * 100
@@ -821,7 +846,7 @@ def multi_resolution_likelihood_optimization(multi_res_submaps: dict,
         total_time = sum(resolution_times.values())
         if debug:
             print(f"\n========== 各分辨率层耗时统计 ==========")
-            for res in resolutions:
+            for res in available_resolutions:
                 if res in resolution_times:
                     time_percent = (resolution_times[res] / total_time) * 100
                     print(f"分辨率 {res}m: {resolution_times[res]:.4f}s ({time_percent:.1f}%)")
@@ -835,8 +860,8 @@ def main():
     parser.add_argument("--plot", action="store_true", help="显示粒子滤波中间过程的可视化")
     parser.add_argument("--use-gt", action="store_true", help="使用path_pg_rtk.txt中的真值作为初始位姿和参考真值")
     parser.add_argument("--submap", type=int, help="指定要优化的子图ID，默认为随机选择")
-    parser.add_argument("--multi-res", action="store_true",
-                       help="使用多分辨率匹配策略：从低分辨率到高分辨率逐层优化")
+    parser.add_argument("--multi-res", nargs='?', const=5, type=int, default=None,
+                       help="使用多分辨率匹配策略：从低分辨率到高分辨率逐层优化。可指定层数(默认5层，包含0.1m分辨率)")
     parser.add_argument("--likelihood", action="store_true",
                        help="使用似然地图优化：基于概率地图的梯度下降优化，提高精度并降低资源消耗")
     parser.add_argument("--candidates", type=int, default=3,
@@ -849,14 +874,27 @@ def main():
         return
 
     # 1. 加载全局地图
-    if args.multi_res or args.likelihood:
+    if args.multi_res is not None or args.likelihood:
         try:
-            multi_res_global_maps = load_multi_resolution_global_maps(args.folder_path)
-            global_map = multi_res_global_maps[0.1]
+            # 确定层数
+            num_layers = args.multi_res if args.multi_res is not None else 5
+            multi_res_global_maps = load_multi_resolution_global_maps(args.folder_path, num_layers)
+            
+            # 检查是否成功加载了地图
+            if not multi_res_global_maps:
+                print("多分辨率地图加载失败，回退到单分辨率模式...")
+                args.multi_res = None
+                args.likelihood = False
+                global_map = load_global_map(os.path.join(args.folder_path, 'global_map.bin'))
+            else:
+                # 使用最高分辨率的地图作为默认全局地图
+                highest_res = min(multi_res_global_maps.keys())
+                global_map = multi_res_global_maps[highest_res]
+                
         except Exception as e:
             print(f"多分辨率地图加载失败: {e}")
             print("回退到单分辨率模式...")
-            args.multi_res = False
+            args.multi_res = None
             args.likelihood = False
             global_map = load_global_map(os.path.join(args.folder_path, 'global_map.bin'))
     else:
@@ -913,7 +951,8 @@ def main():
     # 5. 优化位姿
     if args.likelihood:
         print(f"使用似然地图优化策略 (候选数量: {args.candidates})...")
-        multi_res_submaps = generate_multi_resolution_submap(submap, use_likelihood=True)
+        num_layers = args.multi_res if args.multi_res is not None else 5
+        multi_res_submaps = generate_multi_resolution_submap(submap, use_likelihood=True, num_layers=num_layers)
         opt_pose, error = multi_resolution_likelihood_optimization(
             multi_res_submaps, 
             multi_res_global_maps, 
@@ -923,12 +962,15 @@ def main():
             debug=args.debug,
             n_candidates=args.candidates
         )
-        final_submap = multi_res_submaps[0.1] if 0.1 in multi_res_submaps else submap
+        # 使用最高分辨率的地图进行可视化
+        highest_res = min(multi_res_submaps.keys()) if multi_res_submaps else 0.1
+        final_submap = multi_res_submaps[highest_res] if multi_res_submaps else submap
         visualize_optimization(global_map, final_submap, true_pose, init_pose, opt_pose, 
-                             None, submap_id, submap_res=0.1, global_res=0.1)
-    elif args.multi_res:
-        print("使用多分辨率优化策略...")
-        multi_res_submaps = generate_multi_resolution_submap(submap, use_likelihood=False)
+                             None, submap_id, submap_res=highest_res, global_res=highest_res)
+    elif args.multi_res is not None:
+        print(f"使用多分辨率优化策略 ({args.multi_res} 层)...")
+        num_layers = args.multi_res
+        multi_res_submaps = generate_multi_resolution_submap(submap, use_likelihood=False, num_layers=num_layers)
         opt_pose, error = multi_resolution_optimization(
             multi_res_submaps, 
             multi_res_global_maps, 
@@ -937,9 +979,11 @@ def main():
             visualize=args.plot,
             debug=args.debug
         )
-        final_submap = multi_res_submaps[0.1] if 0.1 in multi_res_submaps else submap
+        # 使用最高分辨率的地图进行可视化
+        highest_res = min(multi_res_submaps.keys()) if multi_res_submaps else 0.1
+        final_submap = multi_res_submaps[highest_res] if multi_res_submaps else submap
         visualize_optimization(global_map, final_submap, true_pose, init_pose, opt_pose, 
-                             None, submap_id, submap_res=0.1, global_res=0.1)
+                             None, submap_id, submap_res=highest_res, global_res=highest_res)
     else:
         print("使用单分辨率优化...")
         opt_pose, error = optimize_submap_pose(submap, global_map, init_pose, 
