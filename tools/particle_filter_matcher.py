@@ -214,10 +214,9 @@ def match_submap_with_particle_filter(submap: 'GridMap',
             no_improvement_count += 1
         
         if no_improvement_count >= no_improvement_threshold:
-            print(f"Early stopping due to no significant improvement for {no_improvement_threshold} iterations.")
-            if visualize:
-                plt.ioff() 
-                plt.close(fig) 
+            print(
+                f"Early stopping due to no significant improvement for {no_improvement_threshold} iterations."
+            )
             break
 
         # Visualize if requested
@@ -247,6 +246,10 @@ def match_submap_with_particle_filter(submap: 'GridMap',
         # Resample particles
         pf.resample()
     
+    if visualize:
+        plt.ioff()
+        plt.close(fig)
+
     return best_pose, min_error
 
 def compute_matching_error(occupied_cells: np.ndarray,
