@@ -8,6 +8,17 @@ import matplotlib as mpl
 mpl.rcParams['font.sans-serif'] = ['SimHei']
 mpl.rcParams['axes.unicode_minus'] = False
 
+def extract_occupied_cells(submap: GridMap, res: float) -> np.ndarray:
+    """Return (N,2) array of world coordinates for cells with prob > 0.6."""
+    coords = []
+    for key, p in submap.occ_map.items():
+        if p > 0.6:
+            i, j = decode_key(key)
+            coords.append((i * res, j * res))
+    if len(coords) == 0:
+        return np.empty((0, 2), dtype=np.float64)
+    return np.asarray(coords, dtype=np.float64)
+
 class Particle:
     def __init__(self, x: float, y: float, theta: float, weight: float = 1.0):
         self.x = x
@@ -62,40 +73,31 @@ class ParticleFilter:
             p.theta = np.mod(p.theta + np.pi, 2*np.pi) - np.pi
             
     def update_weights(self,
-                      submap: 'GridMap',
+                      occupied_cells: np.ndarray,
                       global_map: 'GridMap',
-                      submap_res: float = 0.05,
                       global_res: float = 0.1):
         """Update particle weights based on map matching score"""
         total_weight = 0.0
-        
+
         for particle in self.particles:
             T = particle.to_matrix()
             score = 0
             count = 0
-            
-            for key, p_sub_raw in submap.occ_map.items():
-                # 二值化子图概率
-                p_sub_binary = 1.0 if p_sub_raw > 0.6 else 0.0
 
-                # 只考虑占用栅格
-                if p_sub_binary == 0.0:
-                    continue
-                    
-                sub_i, sub_j = decode_key(key)
-                p_s = np.array([sub_i * submap_res, sub_j * submap_res, 0.0])
+            for cell in occupied_cells:
+                p_s = np.array([cell[0], cell[1], 0.0])
                 p_w = T[:3, :3] @ p_s + T[:3, 3]
-                
+
                 gi_glob = int(np.round(p_w[0] / global_res))
                 gj_glob = int(np.round(p_w[1] / global_res))
                 key_glob = encode_key(gi_glob, gj_glob)
-                
+
                 p_glob_binary = 0.0
                 if key_glob in global_map.occ_map:
                     p_glob_raw = global_map.occ_map[key_glob]
                     p_glob_binary = 1.0 if p_glob_raw > 0.6 else 0.0
-                    
-                diff = abs(p_glob_binary - p_sub_binary)
+
+                diff = abs(p_glob_binary - 1.0)
                 score += diff
                 count += 1
             
@@ -170,6 +172,8 @@ def match_submap_with_particle_filter(submap: 'GridMap',
     )
     
     pf.initialize_particles(init_pose, spread=spread)
+
+    occupied_cells = extract_occupied_cells(submap, submap_res)
     
     # Setup visualization
     if visualize:
@@ -189,13 +193,13 @@ def match_submap_with_particle_filter(submap: 'GridMap',
         pf.predict(np.eye(4))
 
         # Update weights based on map matching
-        pf.update_weights(submap, global_map, submap_res=submap_res, global_res=global_res)
+        pf.update_weights(occupied_cells, global_map, global_res=global_res)
         
         # Get current estimate
         current_pose = pf.get_estimated_pose()
         
         # Calculate current error
-        error = compute_matching_error(submap, global_map, current_pose, submap_res=submap_res, global_res=global_res)
+        error = compute_matching_error(occupied_cells, global_map, current_pose, global_res=global_res)
         
         # Update best pose if needed
         if error < min_error:
@@ -245,32 +249,27 @@ def match_submap_with_particle_filter(submap: 'GridMap',
     
     return best_pose, min_error
 
-def compute_matching_error(submap: 'GridMap',
+def compute_matching_error(occupied_cells: np.ndarray,
                          global_map: 'GridMap',
                          pose: np.ndarray,
-                         submap_res: float = 0.05,
                          global_res: float = 0.1) -> float:
     """Compute matching error between submap and global map"""
     total_error = 0
     count = 0
-    
-    for key, p_sub in submap.occ_map.items():
-        if p_sub < 0.6:
-            continue
-            
-        sub_i, sub_j = decode_key(key)
-        p_s = np.array([sub_i * submap_res, sub_j * submap_res, 0.0])
+
+    for cell in occupied_cells:
+        p_s = np.array([cell[0], cell[1], 0.0])
         p_w = pose[:3, :3] @ p_s + pose[:3, 3]
-        
+
         gi_glob = int(np.round(p_w[0] / global_res))
         gj_glob = int(np.round(p_w[1] / global_res))
-        
+
         key_glob = encode_key(gi_glob, gj_glob)
         if key_glob in global_map.occ_map:
             p_glob = global_map.occ_map[key_glob]
-            total_error += abs(p_glob - p_sub)
+            total_error += abs(p_glob - 1.0)
             count += 1
-    
+
     return total_error / max(count, 1)
 
 def transform_submap(submap: 'GridMap', pose: np.ndarray,
