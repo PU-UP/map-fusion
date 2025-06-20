@@ -9,15 +9,15 @@ mpl.rcParams['font.sans-serif'] = ['SimHei']
 mpl.rcParams['axes.unicode_minus'] = False
 
 def extract_occupied_cells(submap: GridMap, res: float) -> np.ndarray:
-    """Return (N,2) array of world coordinates for cells with prob > 0.6."""
-    coords = []
+    """Return (N,3) array of world coordinates and probabilities."""
+    cells = []
     for key, p in submap.occ_map.items():
-        if p > 0.6:
+        if p > 0.6 or p < 0.4:
             i, j = decode_key(key)
-            coords.append((i * res, j * res))
-    if len(coords) == 0:
-        return np.empty((0, 2), dtype=np.float64)
-    return np.asarray(coords, dtype=np.float64)
+            cells.append((i * res, j * res, p))
+    if len(cells) == 0:
+        return np.empty((0, 3), dtype=np.float64)
+    return np.asarray(cells, dtype=np.float64)
 
 class Particle:
     def __init__(self, x: float, y: float, theta: float, weight: float = 1.0):
@@ -82,7 +82,8 @@ class ParticleFilter:
         if occupied_cells.size == 0:
             return
 
-        occ_points = occupied_cells
+        occ_points = occupied_cells[:, :2]
+        occ_probs = occupied_cells[:, 2]
 
         for particle in self.particles:
             c, s = np.cos(particle.theta), np.sin(particle.theta)
@@ -95,11 +96,9 @@ class ParticleFilter:
             gj = np.round(world_pts[:, 1] / global_res).astype(np.int64)
 
             keys = (gi.astype(np.int64) << 32) | (gj.astype(np.int64) & 0xFFFFFFFF)
-            probs = np.array([global_map.occ_map.get(int(k), 0.0) for k in keys])
+            probs = np.array([global_map.occ_map.get(int(k), 0.5) for k in keys])
 
-            p_binary = np.where(probs > 0.6, 1.0, 0.0)
-            diff = np.abs(p_binary - 1.0)
-
+            diff = (probs - occ_probs) ** 2
             avg_score = diff.mean() if diff.size > 0 else 1.0
             weight = np.exp(-avg_score / self.measurement_noise)
             particle.weight = weight
@@ -254,27 +253,27 @@ def compute_matching_error(occupied_cells: np.ndarray,
                          global_map: 'GridMap',
                          pose: np.ndarray,
                          global_res: float = 0.1) -> float:
-    """Compute matching error between submap and global map"""
+    """Compute matching error between submap and global map using likelihoods"""
     if occupied_cells.size == 0:
         return 0.0
+
+    coords = occupied_cells[:, :2]
+    probs_sub = occupied_cells[:, 2]
 
     c, s = pose[0, 0], pose[1, 0]
     rot = np.array([[c, -s], [s, c]])
     trans = pose[:2, 3]
 
-    world_pts = occupied_cells @ rot.T + trans
+    world_pts = coords @ rot.T + trans
 
     gi = np.round(world_pts[:, 0] / global_res).astype(np.int64)
     gj = np.round(world_pts[:, 1] / global_res).astype(np.int64)
 
     keys = (gi.astype(np.int64) << 32) | (gj.astype(np.int64) & 0xFFFFFFFF)
-    probs = np.array([global_map.occ_map.get(int(k), 0.0) for k in keys])
+    probs = np.array([global_map.occ_map.get(int(k), 0.5) for k in keys])
 
-    valid = probs > -1  # all entries valid, keep for consistency
-    if np.any(valid):
-        errors = np.abs(probs[valid] - 1.0)
-        return errors.mean()
-    return 0.0
+    errors = (probs - probs_sub) ** 2
+    return errors.mean() if errors.size > 0 else 0.0
 
 def transform_submap(submap: 'GridMap', pose: np.ndarray,
                      submap_res: float = 0.05,

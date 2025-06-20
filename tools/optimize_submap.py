@@ -20,7 +20,7 @@ import numpy as np
 import matplotlib.pyplot as plt
 from fuse_submaps import (
     load_submap, load_global_map, GridMap, decode_key,
-    add_noise_to_pose, downsample_map, ternarize_map
+    add_noise_to_pose, downsample_map
 )
 from particle_filter_matcher import encode_key, match_submap_with_particle_filter
 from typing import Optional
@@ -60,15 +60,15 @@ def compute_matching_error(submap: GridMap,
                          global_res: float = 0.1,
                          debug: bool = False) -> float:
     """计算子图与全局地图的匹配误差"""
-    total_error = 0
+    total_error = 0.0
     count = 0
     matched_count = 0
-    
-    occupied_cells = [(key, p) for key, p in submap.occ_map.items() if p > 0.6]
+
+    cells = [(key, p) for key, p in submap.occ_map.items() if p > 0.6 or p < 0.4]
     if debug:
-        print(f"子图占用栅格数量: {len(occupied_cells)}")
-    
-    for key, _ in occupied_cells:
+        print(f"子图占用/空闲栅格数量: {len(cells)}")
+
+    for key, p_cell in cells:
         sub_i, sub_j = decode_key(key)
         p_s = np.array([sub_i * submap_res, sub_j * submap_res, 0.0])
         p_w = pose[:3, :3] @ p_s + pose[:3, 3]
@@ -77,11 +77,12 @@ def compute_matching_error(submap: GridMap,
         gj_glob = int(np.round(p_w[1] / global_res))
         key_glob = encode_key(gi_glob, gj_glob)
         
-        if key_glob in global_map.occ_map and global_map.occ_map[key_glob] > 0.6:
+        p_glob = global_map.occ_map.get(key_glob, 0.5)
+        diff = p_glob - p_cell
+        if abs(diff) < 0.4:
             matched_count += 1
-        else:
-            total_error += 1
-        
+        total_error += diff * diff
+
         count += 1
     
     if debug:
@@ -257,9 +258,8 @@ def generate_multi_resolution_submap(submap: GridMap) -> dict:
     sys.stdout = StringIO()
     try:
         base_submap = downsample_map(submap, 0.05, 0.1)
-        base_submap = ternarize_map(base_submap)
         submaps[0.1] = base_submap
-        
+
         for res in resolutions[1:]:
             downsampled = downsample_map(base_submap, 0.1, res)
             submaps[res] = downsampled
