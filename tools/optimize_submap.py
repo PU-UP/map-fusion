@@ -23,7 +23,7 @@ from fuse_submaps import (
     add_noise_to_pose, downsample_map, ternarize_map
 )
 from particle_filter_matcher import encode_key, match_submap_with_particle_filter
-from typing import Tuple, Optional
+from typing import Optional
 import argparse
 import math
 from matplotlib.gridspec import GridSpec
@@ -90,6 +90,11 @@ def compute_matching_error(submap: GridMap,
         print(f"匹配率: {matched_count/max(count,1)*100:.1f}%")
     
     return total_error / max(count, 1)
+
+def angle_diff(a: float, b: float) -> float:
+    """Return normalized difference between two angles."""
+    diff = a - b
+    return np.arctan2(np.sin(diff), np.cos(diff))
 
 def visualize_optimization(global_map: GridMap,
                          submap: GridMap,
@@ -167,11 +172,15 @@ def visualize_optimization(global_map: GridMap,
     
     # 计算位姿误差
     init_trans_error = np.linalg.norm(init_pose[:2, 3] - true_pose[:2, 3])
-    init_rot_error = np.abs(np.arctan2(init_pose[1, 0], init_pose[0, 0]) - 
-                           np.arctan2(true_pose[1, 0], true_pose[0, 0]))
+    init_rot_error = abs(angle_diff(
+        np.arctan2(init_pose[1, 0], init_pose[0, 0]),
+        np.arctan2(true_pose[1, 0], true_pose[0, 0])
+    ))
     opt_trans_error = np.linalg.norm(opt_pose[:2, 3] - true_pose[:2, 3])
-    opt_rot_error = np.abs(np.arctan2(opt_pose[1, 0], opt_pose[0, 0]) - 
-                          np.arctan2(true_pose[1, 0], true_pose[0, 0]))
+    opt_rot_error = abs(angle_diff(
+        np.arctan2(opt_pose[1, 0], opt_pose[0, 0]),
+        np.arctan2(true_pose[1, 0], true_pose[0, 0])
+    ))
     
     fig.subplots_adjust(bottom=0.18)
     info_text = (
@@ -367,9 +376,13 @@ def main():
     parser.add_argument("--plot", action="store_true", help="显示粒子滤波中间过程的可视化")
     parser.add_argument("--use-gt", action="store_true", help="使用path_pg_rtk.txt中的真值作为初始位姿和参考真值")
     parser.add_argument("--submap", type=int, help="指定要优化的子图ID，默认为随机选择")
-    parser.add_argument("--multi-res", action="store_true", 
+    parser.add_argument("--multi-res", action="store_true",
                        help="使用多分辨率匹配策略：从低分辨率到高分辨率逐层优化")
     args = parser.parse_args()
+
+    if not os.path.isdir(args.folder_path):
+        print(f"错误：文件夹 {args.folder_path} 不存在")
+        return
 
     # 1. 加载全局地图
     if args.multi_res:
@@ -453,7 +466,6 @@ def main():
                              None, submap_id, submap_res=0.05, global_res=0.1)
     
     print(f"优化完成，最终误差: {error:.6f}")
-    plt.show()
 
 if __name__ == '__main__':
     main() 

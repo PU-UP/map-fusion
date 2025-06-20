@@ -282,8 +282,8 @@ def fuse_submaps(folder_path: str, save_path: Optional[str] = None,
             p_s = np.array([sub_i * submap_res, sub_j * submap_res, 0.0])
             p_w = first_pose[:3, :3] @ p_s + first_pose[:3, 3]
             
-            gi_glob = int(np.floor(p_w[0] / global_res))
-            gj_glob = int(np.floor(p_w[1] / global_res))
+            gi_glob = int(np.round(p_w[0] / global_res))
+            gj_glob = int(np.round(p_w[1] / global_res))
             
             global_map.update_occ(gi_glob, gj_glob, p_meas)
     
@@ -354,8 +354,8 @@ def downsample_map(high_res_map: GridMap, high_res: float, low_res: float) -> Gr
         gi, gj = decode_key(key)
         x, y = gi * high_res, gj * high_res
         
-        low_gi = int(np.floor(x / low_res))
-        low_gj = int(np.floor(y / low_res))
+        low_gi = int(np.round(x / low_res))
+        low_gj = int(np.round(y / low_res))
         low_key = encode_key(low_gi, low_gj)
         
         if low_key not in low_res_groups:
