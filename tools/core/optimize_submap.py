@@ -1082,8 +1082,8 @@ def main():
     parser.add_argument("--debug", action="store_true", help="开启调试模式：详细耗时打印和误差变化图")
     parser.add_argument("--add-noise", nargs=2, type=float, metavar=('DIS', 'DEG'),
                        help="为初始位姿添加噪声：DIS(米)为位置噪声，DEG(度)为角度噪声")
-    parser.add_argument("--save", type=str, nargs='?', const="../results", default="../results",
-                       help="保存结果的路径，默认为上级目录的results文件夹")
+    parser.add_argument("--save", type=str, nargs='?', const="../results", default=None,
+                       help="保存结果的路径。不指定则不保存，指定路径则保存到该路径")
     args = parser.parse_args()
 
     if not os.path.isdir(args.folder_path):
@@ -1261,7 +1261,10 @@ def main():
                                                  None, submap_res=0.05, global_res=0.1)
             
             # 保存批量优化结果（包含可视化图像）
-            save_batch_results(args.save, all_results, args, global_map, save_visualization=True)
+            if args.save is not None:
+                save_batch_results(args.save, all_results, args, global_map, save_visualization=True)
+            else:
+                print("未指定保存路径，跳过保存")
         else:
             print("没有成功处理任何子图")
         
@@ -1432,11 +1435,14 @@ def main():
     matching_time = 1.0  # 默认值，实际应该从优化函数中获取
 
     # 保存优化结果
-    save_optimization_results(args.save, submap_id, true_pose, init_pose, opt_pose, 
-                             init_match_error, final_match_error, matching_time, args, 
-                             global_map, submap, 
-                             multi_res_submaps if 'multi_res_submaps' in locals() else None,
-                             multi_res_global_maps if 'multi_res_global_maps' in locals() else None)
+    if args.save is not None:
+        save_optimization_results(args.save, submap_id, true_pose, init_pose, opt_pose, 
+                                 init_match_error, final_match_error, matching_time, args, 
+                                 global_map, submap, 
+                                 multi_res_submaps if 'multi_res_submaps' in locals() else None,
+                                 multi_res_global_maps if 'multi_res_global_maps' in locals() else None)
+    else:
+        print("未指定保存路径，跳过保存")
 
 if __name__ == '__main__':
     main() 
