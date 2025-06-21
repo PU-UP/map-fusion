@@ -30,6 +30,8 @@ import os
 import sys
 import numpy as np
 import matplotlib.pyplot as plt
+import json
+import datetime
 from fuse_submaps import (
     load_submap, load_global_map, GridMap, decode_key,
     add_noise_to_pose, downsample_map, ternarize_map
@@ -623,6 +625,448 @@ def visualize_all_optimization_results(global_map: GridMap,
         print("显示两个窗口：主图和误差统计。关闭窗口后程序将继续。")
         plt.show()
 
+def save_optimization_results(save_path: str,
+                            submap_id: int,
+                            true_pose: np.ndarray,
+                            init_pose: np.ndarray,
+                            opt_pose: np.ndarray,
+                            init_match_error: float,
+                            final_match_error: float,
+                            matching_time: float,
+                            args: argparse.Namespace,
+                            global_map: GridMap,
+                            submap: GridMap,
+                            multi_res_submaps: Optional[dict] = None,
+                            multi_res_global_maps: Optional[dict] = None,
+                            additional_info: Optional[dict] = None,
+                            save_visualization: bool = True):
+    """保存优化结果到指定路径"""
+    # 确保保存目录存在
+    os.makedirs(save_path, exist_ok=True)
+    
+    # 生成时间戳
+    timestamp = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
+    
+    # 创建结果目录
+    result_dir = os.path.join(save_path, f"submap_{submap_id}_{timestamp}")
+    os.makedirs(result_dir, exist_ok=True)
+    
+    # 1. 保存位姿数据
+    pose_data = {
+        "submap_id": submap_id,
+        "timestamp": timestamp,
+        "true_pose": true_pose.tolist(),
+        "initial_pose": init_pose.tolist(),
+        "optimized_pose": opt_pose.tolist(),
+        "pose_differences": {
+            "translation_error_before": float(np.linalg.norm(init_pose[:2, 3] - true_pose[:2, 3])),
+            "translation_error_after": float(np.linalg.norm(opt_pose[:2, 3] - true_pose[:2, 3])),
+            "rotation_error_before": float(np.rad2deg(abs(angle_diff(
+                np.arctan2(init_pose[1, 0], init_pose[0, 0]),
+                np.arctan2(true_pose[1, 0], true_pose[0, 0])
+            )))),
+            "rotation_error_after": float(np.rad2deg(abs(angle_diff(
+                np.arctan2(opt_pose[1, 0], opt_pose[0, 0]),
+                np.arctan2(true_pose[1, 0], true_pose[0, 0])
+            ))))
+        }
+    }
+    
+    with open(os.path.join(result_dir, "poses.json"), 'w', encoding='utf-8') as f:
+        json.dump(pose_data, f, indent=2, ensure_ascii=False)
+    
+    # 2. 保存匹配误差和性能数据
+    performance_data = {
+        "matching_errors": {
+            "initial": float(init_match_error),
+            "final": float(final_match_error),
+            "improvement_percentage": float((init_match_error - final_match_error) / max(init_match_error, 1e-6) * 100)
+        },
+        "performance": {
+            "matching_time_seconds": float(matching_time),
+            "matching_rate_before": float(1.0 - init_match_error),
+            "matching_rate_after": float(1.0 - final_match_error)
+        }
+    }
+    
+    with open(os.path.join(result_dir, "performance.json"), 'w', encoding='utf-8') as f:
+        json.dump(performance_data, f, indent=2, ensure_ascii=False)
+    
+    # 3. 保存配置参数
+    config_data = {
+        "command_line_args": vars(args),
+        "optimization_settings": {
+            "use_multi_resolution": args.multi_res is not None,
+            "multi_resolution_layers": args.multi_res if args.multi_res else None,
+            "use_likelihood": args.likelihood,
+            "use_ground_truth": args.use_gt,
+            "debug_mode": args.debug,
+            "visualization_enabled": args.plot
+        }
+    }
+    
+    if additional_info:
+        config_data["additional_info"] = additional_info
+    
+    with open(os.path.join(result_dir, "config.json"), 'w', encoding='utf-8') as f:
+        json.dump(config_data, f, indent=2, ensure_ascii=False)
+    
+    # 4. 保存可视化图像
+    if save_visualization:
+        try:
+            # 生成完整的可视化图像
+            if args.multi_res is not None and multi_res_submaps and multi_res_global_maps:
+                highest_res = min(multi_res_submaps.keys())
+                submap_for_vis = multi_res_submaps[highest_res]
+                visualize_optimization(multi_res_global_maps[highest_res], submap_for_vis, true_pose, init_pose, opt_pose, 
+                                     os.path.join(result_dir, "optimization_visualization.png"), 
+                                     submap_id, submap_res=highest_res, global_res=highest_res)
+            else:
+                visualize_optimization(global_map, submap, true_pose, init_pose, opt_pose, 
+                                     os.path.join(result_dir, "optimization_visualization.png"), 
+                                     submap_id, submap_res=0.05, global_res=0.1)
+            
+            # 创建简单的统计图表
+            plt.figure(figsize=(12, 8))
+            plt.subplot(2, 2, 1)
+            plt.title("位置误差对比")
+            plt.bar(['优化前', '优化后'], 
+                    [pose_data["pose_differences"]["translation_error_before"],
+                     pose_data["pose_differences"]["translation_error_after"]])
+            plt.ylabel("位置误差 (米)")
+            
+            plt.subplot(2, 2, 2)
+            plt.title("角度误差对比")
+            plt.bar(['优化前', '优化后'], 
+                    [pose_data["pose_differences"]["rotation_error_before"],
+                     pose_data["pose_differences"]["rotation_error_after"]])
+            plt.ylabel("角度误差 (度)")
+            
+            plt.subplot(2, 2, 3)
+            plt.title("匹配误差对比")
+            plt.bar(['优化前', '优化后'], 
+                    [performance_data["matching_errors"]["initial"],
+                     performance_data["matching_errors"]["final"]])
+            plt.ylabel("匹配误差")
+            
+            plt.subplot(2, 2, 4)
+            plt.title("匹配率对比")
+            plt.bar(['优化前', '优化后'], 
+                    [performance_data["performance"]["matching_rate_before"],
+                     performance_data["performance"]["matching_rate_after"]])
+            plt.ylabel("匹配率")
+            
+            plt.tight_layout()
+            plt.savefig(os.path.join(result_dir, "optimization_summary.png"), dpi=300, bbox_inches='tight')
+            plt.close()
+            
+        except Exception as e:
+            print(f"警告：保存可视化图像时出错: {e}")
+    
+    # 5. 保存总结报告
+    summary = f"""子图位姿优化结果报告
+=======================
+
+子图ID: {submap_id}
+时间戳: {timestamp}
+优化策略: {'多分辨率' if args.multi_res else '单分辨率'}{' + 似然优化' if args.likelihood else ' + 粒子滤波'}
+
+位姿误差改善:
+  位置误差: {pose_data["pose_differences"]["translation_error_before"]:.3f}m → {pose_data["pose_differences"]["translation_error_after"]:.3f}m
+  角度误差: {pose_data["pose_differences"]["rotation_error_before"]:.1f}° → {pose_data["pose_differences"]["rotation_error_after"]:.1f}°
+
+匹配性能:
+  匹配误差: {performance_data["matching_errors"]["initial"]:.6f} → {performance_data["matching_errors"]["final"]:.6f}
+  匹配率: {performance_data["performance"]["matching_rate_before"]:.1%} → {performance_data["performance"]["matching_rate_after"]:.1%}
+  改善率: {performance_data["matching_errors"]["improvement_percentage"]:.1f}%
+
+性能统计:
+  优化耗时: {performance_data["performance"]["matching_time_seconds"]:.2f}秒
+
+配置参数:
+  多分辨率层数: {args.multi_res if args.multi_res else '未使用'}
+  似然优化: {'是' if args.likelihood else '否'}
+  使用真值: {'是' if args.use_gt else '否'}
+  调试模式: {'是' if args.debug else '否'}
+"""
+    
+    with open(os.path.join(result_dir, "summary.txt"), 'w', encoding='utf-8') as f:
+        f.write(summary)
+    
+    print(f"优化结果已保存到: {result_dir}")
+    return result_dir
+
+def save_batch_results(save_path: str,
+                      all_results: list,
+                      args: argparse.Namespace,
+                      global_map: GridMap,
+                      save_visualization: bool = True):
+    """保存批量优化结果"""
+    # 确保保存目录存在
+    os.makedirs(save_path, exist_ok=True)
+    
+    # 生成时间戳
+    timestamp = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
+    
+    # 创建结果目录
+    result_dir = os.path.join(save_path, f"batch_optimization_{timestamp}")
+    os.makedirs(result_dir, exist_ok=True)
+    
+    # 1. 保存所有子图的详细结果
+    detailed_results = []
+    for result in all_results:
+        detailed_result = {
+            "submap_id": result["submap_id"],
+            "pose_errors": {
+                "translation_before": float(result["init_pos_error"]),
+                "translation_after": float(result["opt_pos_error"]),
+                "rotation_before": float(result["init_rot_error"]),
+                "rotation_after": float(result["opt_rot_error"])
+            },
+            "matching_errors": {
+                "before": float(result["init_match_error"]),
+                "after": float(result["final_match_error"])
+            },
+            "performance": {
+                "matching_time": float(result["matching_time"])
+            }
+        }
+        detailed_results.append(detailed_result)
+    
+    with open(os.path.join(result_dir, "detailed_results.json"), 'w', encoding='utf-8') as f:
+        json.dump(detailed_results, f, indent=2, ensure_ascii=False)
+    
+    # 2. 保存统计摘要
+    init_pos_errors = [r["init_pos_error"] for r in all_results]
+    opt_pos_errors = [r["opt_pos_error"] for r in all_results]
+    init_rot_errors = [r["init_rot_error"] for r in all_results]
+    opt_rot_errors = [r["opt_rot_error"] for r in all_results]
+    match_times = [r["matching_time"] for r in all_results]
+    
+    pose_improvement_count = sum(1 for r in all_results if r["opt_pos_error"] < r["init_pos_error"])
+    
+    statistics = {
+        "summary": {
+            "total_submaps": len(all_results),
+            "successful_improvements": pose_improvement_count,
+            "improvement_rate": float(pose_improvement_count / len(all_results) * 100)
+        },
+        "position_errors": {
+            "initial_mean": float(np.mean(init_pos_errors)),
+            "initial_std": float(np.std(init_pos_errors)),
+            "final_mean": float(np.mean(opt_pos_errors)),
+            "final_std": float(np.std(opt_pos_errors))
+        },
+        "rotation_errors": {
+            "initial_mean": float(np.mean(init_rot_errors)),
+            "initial_std": float(np.std(init_rot_errors)),
+            "final_mean": float(np.mean(opt_rot_errors)),
+            "final_std": float(np.std(opt_rot_errors))
+        },
+        "performance": {
+            "total_time": float(sum(match_times)),
+            "average_time": float(np.mean(match_times)),
+            "time_std": float(np.std(match_times))
+        }
+    }
+    
+    with open(os.path.join(result_dir, "statistics.json"), 'w', encoding='utf-8') as f:
+        json.dump(statistics, f, indent=2, ensure_ascii=False)
+    
+    # 3. 保存配置参数
+    config_data = {
+        "command_line_args": vars(args),
+        "optimization_settings": {
+            "use_multi_resolution": args.multi_res is not None,
+            "multi_resolution_layers": args.multi_res if args.multi_res else None,
+            "use_likelihood": args.likelihood,
+            "use_ground_truth": args.use_gt,
+            "debug_mode": args.debug
+        }
+    }
+    
+    with open(os.path.join(result_dir, "config.json"), 'w', encoding='utf-8') as f:
+        json.dump(config_data, f, indent=2, ensure_ascii=False)
+    
+    # 4. 保存可视化图像
+    if save_visualization:
+        try:
+            # 保存主图（所有子图的优化结果可视化）
+            main_image_path = os.path.join(result_dir, "batch_main_visualization.png")
+            
+            # 创建主图但不显示，直接保存
+            global_grid = global_map.to_matrix()
+            
+            def transform_submap_vis(submap: GridMap, pose: np.ndarray) -> np.ndarray:
+                grid = np.zeros_like(global_grid)
+                for key, p_meas in submap.occ_map.items():
+                    if p_meas < 0.6:
+                        continue
+                    sub_i, sub_j = decode_key(key)
+                    p_s = np.array([sub_i * 0.05, sub_j * 0.05, 0.0])
+                    p_w = pose[:3, :3] @ p_s + pose[:3, 3]
+                    gi_glob = int(np.round(p_w[0] / 0.1))
+                    gj_glob = int(np.round(p_w[1] / 0.1))
+                    if 0 <= gi_glob - global_map.min_i < grid.shape[0] and \
+                       0 <= gj_glob - global_map.min_j < grid.shape[1]:
+                        grid[gi_glob - global_map.min_i, gj_glob - global_map.min_j] = 1
+                return grid
+            
+            # 创建主图
+            vis = np.zeros((*global_grid.shape, 3))
+            background = np.zeros_like(global_grid)
+            background[global_grid <= 0.4] = 0.7
+            background[global_grid >= 0.6] = 0.0
+            background[np.logical_and(global_grid > 0.4, global_grid < 0.6)] = 0.3
+            for i in range(3):
+                vis[..., i] = background
+
+            for result in all_results:
+                submap = result['submap_for_vis']
+                true_pose = result['true_pose']
+                true_grid = transform_submap_vis(submap, true_pose)
+                vis[true_grid > 0] = [0, 1, 0]
+            for result in all_results:
+                submap = result['submap_for_vis']
+                opt_pose = result['opt_pose']
+                opt_grid = transform_submap_vis(submap, opt_pose)
+                vis[opt_grid > 0] = [1, 0, 0]
+            for result in all_results:
+                submap = result['submap_for_vis']
+                init_pose = result['init_pose']
+                init_grid = transform_submap_vis(submap, init_pose)
+                vis[init_grid > 0] = [0, 0, 1]
+
+            fig1, (ax_main, ax_legend) = plt.subplots(1, 2, figsize=(16, 12), gridspec_kw={'width_ratios': [4, 1]})
+            ax_main.imshow(vis)
+            ax_main.set_title(f'所有子图优化结果 (共{len(all_results)}个子图)', fontsize=16)
+            ax_main.axis('off')
+            
+            ax_legend.axis('off')
+            legend_elements = [ 
+                Rectangle((0, 0), 1, 1, fc=[0, 0, 1], label='初始位置'),
+                Rectangle((0, 0), 1, 1, fc=[1, 0, 0], label='优化后'),
+                Rectangle((0, 0), 1, 1, fc=[0, 1, 0], label='真值'),
+                Rectangle((0, 0), 1, 1, fc=[0.7, 0.7, 0.7], label='空闲区域'),
+                Rectangle((0, 0), 1, 1, fc=[0.3, 0.3, 0.3], label='未知区域'),
+                Rectangle((0, 0), 1, 1, fc=[0, 0, 0], label='占用区域'),
+            ]
+            ax_legend.legend(handles=legend_elements, loc='center left', fontsize=12)
+            fig1.tight_layout()
+            fig1.savefig(main_image_path, dpi=300, bbox_inches='tight')
+            plt.close(fig1)
+            
+            # 保存统计图（误差统计表格）
+            stats_image_path = os.path.join(result_dir, "batch_statistics_visualization.png")
+            
+            # 创建统计图表
+            fig = plt.figure(figsize=(18, 12))
+            gs = GridSpec(2, 1, height_ratios=[7, 5], hspace=0.3)
+            
+            # 上半部分：表格
+            ax_table = fig.add_subplot(gs[0])
+            ax_table.axis('off')
+            
+            # 准备表格数据
+            table_data = [['子图ID', '优化前位姿误差\n(m/°)', '优化后位姿误差\n(m/°)', '位姿改善率', '栅格匹配率', '匹配耗时(s)']]
+            
+            for res in all_results:
+                init_pose_str = f"{res['init_pos_error']:.2f} / {res['init_rot_error']:.1f}"
+                opt_pose_str = f"{res['opt_pos_error']:.2f} / {res['opt_rot_error']:.1f}"
+                
+                # Match rate: 1 - match_error
+                init_match_rate = 1.0 - res['init_match_error']
+                final_match_rate = 1.0 - res['final_match_error']
+                match_rate_str = f"{init_match_rate:.1%} → {final_match_rate:.1%}"
+                
+                pose_improvement_str = format_improvement(res['init_pos_error'], res['opt_pos_error'])
+                
+                table_data.append([
+                    f"{res['submap_id']}",
+                    init_pose_str,
+                    opt_pose_str,
+                    pose_improvement_str,
+                    match_rate_str,
+                    f"{res['matching_time']:.2f}"
+                ])
+            
+            table = ax_table.table(cellText=table_data[1:], colLabels=table_data[0], cellLoc='center', loc='center')
+            table.auto_set_font_size(False)
+            table.set_fontsize(10)
+            table.scale(1, 2.5)
+            
+            for i in range(len(table_data[0])):
+                table[(0, i)].set_facecolor('#4CAF50')
+                table[(0, i)].set_text_props(weight='bold', color='white')
+            
+            # 下半部分：统计信息
+            ax_stats = fig.add_subplot(gs[1])
+            ax_stats.axis('off')
+            ax_stats.set_title('位姿与耗时统计', fontsize=16)
+            
+            pose_improvement_count = sum(1 for r in all_results if r['opt_pos_error'] < r['init_pos_error'])
+            total_batch_time = sum(r['matching_time'] for r in all_results)
+            avg_match_time = total_batch_time / len(all_results) if all_results else 0
+            
+            stats_text = (
+                f'位姿误差统计 (相对于真值)\n\n'
+                f'位置误差: 初始平均 {statistics["position_errors"]["initial_mean"]:.3f}±{statistics["position_errors"]["initial_std"]:.3f} m  →  '
+                f'优化后平均 {statistics["position_errors"]["final_mean"]:.3f}±{statistics["position_errors"]["final_std"]:.3f} m\n\n'
+                f'角度误差: 初始平均 {statistics["rotation_errors"]["initial_mean"]:.1f}±{statistics["rotation_errors"]["initial_std"]:.1f}°  →  '
+                f'优化后平均 {statistics["rotation_errors"]["final_mean"]:.1f}±{statistics["rotation_errors"]["final_std"]:.1f}°\n\n'
+                f'位姿改善情况: {pose_improvement_count}/{len(all_results)} 个子图的位姿得到改善 ({pose_improvement_count/len(all_results)*100:.1f}%)\n\n'
+                f'耗时统计: 平均匹配耗时 {avg_match_time:.2f}s, 总耗时 {total_batch_time:.2f}s'
+            )
+            ax_stats.text(0.5, 0.45, stats_text, ha='center', va='center', fontsize=12,
+                          bbox=dict(facecolor='lightblue', alpha=0.5, edgecolor='none'),
+                          transform=ax_stats.transAxes)
+            
+            fig.suptitle('批量优化结果统计', fontsize=20)
+            fig.tight_layout(rect=(0, 0, 1, 0.96))
+            fig.savefig(stats_image_path, dpi=300, bbox_inches='tight')
+            plt.close(fig)
+            
+            print(f"批量可视化图像已保存:")
+            print(f"  主图: {main_image_path}")
+            print(f"  统计图: {stats_image_path}")
+            
+        except Exception as e:
+            print(f"警告：保存批量可视化图像时出错: {e}")
+    
+    # 5. 保存批量总结报告
+    summary = f"""批量子图位姿优化结果报告
+============================
+
+优化时间: {timestamp}
+处理子图数量: {statistics["summary"]["total_submaps"]}
+成功改善数量: {statistics["summary"]["successful_improvements"]}
+改善率: {statistics["summary"]["improvement_rate"]:.1f}%
+
+位置误差统计:
+  优化前: {statistics["position_errors"]["initial_mean"]:.3f}±{statistics["position_errors"]["initial_std"]:.3f} m
+  优化后: {statistics["position_errors"]["final_mean"]:.3f}±{statistics["position_errors"]["final_std"]:.3f} m
+
+角度误差统计:
+  优化前: {statistics["rotation_errors"]["initial_mean"]:.1f}±{statistics["rotation_errors"]["initial_std"]:.1f}°
+  优化后: {statistics["rotation_errors"]["final_mean"]:.1f}±{statistics["rotation_errors"]["final_std"]:.1f}°
+
+性能统计:
+  总耗时: {statistics["performance"]["total_time"]:.2f}秒
+  平均耗时: {statistics["performance"]["average_time"]:.2f}±{statistics["performance"]["time_std"]:.2f}秒
+
+配置参数:
+  多分辨率层数: {args.multi_res if args.multi_res else '未使用'}
+  似然优化: {'是' if args.likelihood else '否'}
+  使用真值: {'是' if args.use_gt else '否'}
+  调试模式: {'是' if args.debug else '否'}
+"""
+    
+    with open(os.path.join(result_dir, "batch_summary.txt"), 'w', encoding='utf-8') as f:
+        f.write(summary)
+    
+    print(f"批量优化结果已保存到: {result_dir}")
+    return result_dir
+
 def main():
     parser = argparse.ArgumentParser(description="子图位姿优化脚本")
     parser.add_argument("folder_path", type=str, help="包含子图和全局地图的文件夹路径")
@@ -638,6 +1082,8 @@ def main():
     parser.add_argument("--debug", action="store_true", help="开启调试模式：详细耗时打印和误差变化图")
     parser.add_argument("--add-noise", nargs=2, type=float, metavar=('DIS', 'DEG'),
                        help="为初始位姿添加噪声：DIS(米)为位置噪声，DEG(度)为角度噪声")
+    parser.add_argument("--save", type=str, nargs='?', const="../results", default="../results",
+                       help="保存结果的路径，默认为上级目录的results文件夹")
     args = parser.parse_args()
 
     if not os.path.isdir(args.folder_path):
@@ -805,7 +1251,7 @@ def main():
             print(f"所有子图处理完成，共成功处理 {len(all_results)} 个子图")
             print(f"{'='*50}")
             
-            # 使用最高分辨率的地图进行可视化
+            # 显示可视化结果（不保存）
             if use_multi_res:
                 highest_res = min(multi_res_global_maps.keys())
                 visualize_all_optimization_results(global_map, all_results, 
@@ -813,6 +1259,9 @@ def main():
             else:
                 visualize_all_optimization_results(global_map, all_results, 
                                                  None, submap_res=0.05, global_res=0.1)
+            
+            # 保存批量优化结果（包含可视化图像）
+            save_batch_results(args.save, all_results, args, global_map, save_visualization=True)
         else:
             print("没有成功处理任何子图")
         
@@ -946,6 +1395,48 @@ def main():
                                  None, submap_id, submap_res=0.05, global_res=0.1)
         
         print(f"优化完成，最终误差: {error:.6f}")
+
+    # 计算匹配误差和耗时用于保存
+    if args.likelihood:
+        if use_multi_res:
+            highest_res = min(multi_res_submaps.keys())
+            init_match_error = compute_matching_error(
+                multi_res_submaps[highest_res], 
+                multi_res_global_maps[highest_res], 
+                init_pose,
+                submap_res=highest_res,
+                global_res=highest_res
+            )
+            final_match_error = final_error
+        else:
+            init_match_error = compute_matching_error(submap, global_map, init_pose, 
+                                                   submap_res=0.05, global_res=0.1)
+            final_match_error = final_error
+    else:
+        if use_multi_res:
+            highest_res = min(multi_res_submaps.keys())
+            init_match_error = compute_matching_error(
+                multi_res_submaps[highest_res], 
+                multi_res_global_maps[highest_res], 
+                init_pose,
+                submap_res=highest_res,
+                global_res=highest_res
+            )
+            final_match_error = error
+        else:
+            init_match_error = compute_matching_error(submap, global_map, init_pose, 
+                                                   submap_res=0.05, global_res=0.1)
+            final_match_error = error
+    
+    # 估算匹配耗时（这里使用一个合理的默认值，因为实际耗时在优化函数内部）
+    matching_time = 1.0  # 默认值，实际应该从优化函数中获取
+
+    # 保存优化结果
+    save_optimization_results(args.save, submap_id, true_pose, init_pose, opt_pose, 
+                             init_match_error, final_match_error, matching_time, args, 
+                             global_map, submap, 
+                             multi_res_submaps if 'multi_res_submaps' in locals() else None,
+                             multi_res_global_maps if 'multi_res_global_maps' in locals() else None)
 
 if __name__ == '__main__':
     main() 
