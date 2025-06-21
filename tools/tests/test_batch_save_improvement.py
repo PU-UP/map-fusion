@@ -32,7 +32,7 @@ def test_batch_save_improvement():
     
     # 运行批量优化命令
     cmd = [
-        sys.executable, "optimize_submap.py",
+        sys.executable, "../core/optimize_submap.py",
         test_data_path,
         "--submap", "-1",
         "--save", save_path,
@@ -166,7 +166,7 @@ def test_single_submap_save():
     
     # 运行单个子图优化命令
     cmd = [
-        sys.executable, "optimize_submap.py",
+        sys.executable, "../core/optimize_submap.py",
         test_data_path,
         "--submap", "0",  # 处理子图0
         "--save", save_path,

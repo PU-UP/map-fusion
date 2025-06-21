@@ -14,11 +14,11 @@ def test_batch_optimization():
     
     # 检查是否有数据文件夹
     data_folders = [
-        "data/1_rtk",
-        "data/2_rtk", 
-        "data/localization_0506",
-        "data/mapping_0506",
-        "data/submap_200_visual"
+        "../data/1_rtk",
+        "../data/2_rtk", 
+        "../data/localization_0506",
+        "../data/mapping_0506",
+        "../data/submap_200_visual"
     ]
     
     available_folders = []
@@ -45,16 +45,16 @@ def test_batch_optimization():
     # 测试命令
     test_commands = [
         # 基本批量测试
-        f"python optimize_submap.py {test_folder} --submap -1",
+        f"python ../core/optimize_submap.py {test_folder} --submap -1",
         
         # 多分辨率批量测试
-        f"python optimize_submap.py {test_folder} --submap -1 --multi-res 3",
+        f"python ../core/optimize_submap.py {test_folder} --submap -1 --multi-res 3",
         
         # 似然优化批量测试
-        f"python optimize_submap.py {test_folder} --submap -1 --likelihood",
+        f"python ../core/optimize_submap.py {test_folder} --submap -1 --likelihood",
         
         # 添加噪声的批量测试
-        f"python optimize_submap.py {test_folder} --submap -1 --add-noise 0.5 10",
+        f"python ../core/optimize_submap.py {test_folder} --submap -1 --add-noise 0.5 10",
     ]
     
     for i, cmd in enumerate(test_commands, 1):
@@ -114,7 +114,7 @@ def test_batch_optimization_no_visualization():
     # 测试批量优化并保存
     print("\n1. 测试批量优化并保存（不保存中间图片）...")
     cmd = [
-        sys.executable, "optimize_submap.py", 
+        sys.executable, "../core/optimize_submap.py", 
         test_folder,
         "--submap", "-1",
         "--save", "../results/test_batch_no_vis"

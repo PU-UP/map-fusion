@@ -36,7 +36,7 @@ def test_save_functionality():
     # 测试单个子图优化并保存
     print("\n1. 测试单个子图优化并保存...")
     cmd = [
-        sys.executable, "optimize_submap.py", 
+        sys.executable, "../core/optimize_submap.py", 
         test_folder,
         "--submap", "0",
         "--save", "results/test_single"
@@ -59,7 +59,7 @@ def test_save_functionality():
     # 测试批量优化并保存
     print("\n2. 测试批量优化并保存...")
     cmd = [
-        sys.executable, "optimize_submap.py", 
+        sys.executable, "../core/optimize_submap.py", 
         test_folder,
         "--submap", "-1",
         "--save", "results/test_batch"
