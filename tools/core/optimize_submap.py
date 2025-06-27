@@ -50,8 +50,7 @@ from scipy.spatial.transform import Rotation as R
 from io import StringIO
 import time
 
-# 设置matplotlib中文字体
-plt.rcParams['font.sans-serif'] = ['SimHei']
+plt.rcParams['font.sans-serif'] = ['Noto Sans CJK JP' , 'Noto Sans CJK SC', 'WenQuanYi Micro Hei', 'SimHei']
 plt.rcParams['axes.unicode_minus'] = False
 
 def optimize_submap_pose(submap: GridMap, 

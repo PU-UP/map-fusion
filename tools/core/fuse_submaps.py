@@ -12,6 +12,8 @@ import sys
 import struct
 import glob
 import numpy as np
+from pyquaternion import Quaternion
+
 import matplotlib.pyplot as plt
 import matplotlib as mpl
 import argparse
@@ -19,7 +21,7 @@ from typing import Optional
 from scipy.spatial.transform import Rotation as R
 
 # 配置 matplotlib 支持中文显示
-mpl.rcParams['font.sans-serif'] = ['SimHei']
+mpl.rcParams['font.sans-serif'] = ['Noto Sans CJK JP' , 'Noto Sans CJK SC', 'WenQuanYi Micro Hei', 'SimHei']
 mpl.rcParams['axes.unicode_minus'] = False
 
 def decode_key(key: int) -> tuple:
@@ -231,6 +233,38 @@ def visualize_map(occ_map: np.ndarray) -> np.ndarray:
     
     return vis
 
+def interpolate_pose(prev_pose, next_pose, alpha):
+    # 平移
+    interp_t = (1 - alpha) * prev_pose[:3, 3] + alpha * next_pose[:3, 3]
+    
+    # 旋转
+    q1 = Quaternion(matrix=prev_pose[:3, :3])
+    q2 = Quaternion(matrix=next_pose[:3, :3])
+    interp_q = Quaternion.slerp(q1, q2, alpha)
+    
+    interp_pose = np.eye(4)
+    interp_pose[:3, :3] = interp_q.rotation_matrix
+    interp_pose[:3, 3] = interp_t
+    return interp_pose
+
+def find_closest_poses(gt_poses, ts):
+    """
+    找到 ts 前后最近的两个 gt_poses 时间戳
+    :param gt_poses: {timestamp: pose_4x4}
+    :param ts: 当前子图时间戳
+    :return: (prev_ts, next_ts) 或 (None, None) 如果无法插值
+    """
+    sorted_timestamps = sorted(gt_poses.keys())
+    idx = np.searchsorted(sorted_timestamps, ts)
+    
+    if idx == 0:
+        return None, sorted_timestamps[0]  # 只有后一帧
+    elif idx == len(sorted_timestamps):
+        return sorted_timestamps[-1], None  # 只有前一帧
+    else:
+        return sorted_timestamps[idx - 1], sorted_timestamps[idx]  # 前后帧
+
+
 def fuse_submaps(folder_path: str, save_path: Optional[str] = None, 
                 use_gt: bool = False, gt_poses: Optional[dict] = None, 
                 global_res: float = 0.1):
@@ -272,12 +306,44 @@ def fuse_submaps(folder_path: str, save_path: Optional[str] = None,
         # 加载子图
         _, ts, first_pose, min_i, max_i, min_j, max_j, occ_map = load_submap(bin_path)
         
-        if use_gt and gt_poses and ts in gt_poses:
-            print(f"使用地面真值姿态更新submap_{submap_id}的姿态")
-            first_pose = gt_poses[ts]
-        elif use_gt and ts not in gt_poses:
-            print(f"警告：submap_{submap_id}的时间戳未在真值文件中找到，跳过")
-            continue
+        # if use_gt and gt_poses and ts in gt_poses:
+        #     print(f"使用地面真值姿态更新submap_{submap_id}的姿态")
+        #     first_pose = gt_poses[ts]
+        # elif use_gt and ts not in gt_poses:
+        #     print(f"警告：submap_{submap_id}的时间戳未在真值文件中找到，跳过")
+        #     continue
+        
+        # 设置时间戳容差阈值（单位：秒）
+        TIME_TOLERANCE = 0.001 
+        # 设置插值时间差阈值
+        INTERPOLATE_TIME_TOLERANCE = 2
+
+        if use_gt and gt_poses:
+            # 尝试精确匹配
+            gt_timestamps = np.array(list(gt_poses.keys()))
+            closest_idx = np.argmin(np.abs(gt_timestamps - ts))
+            closest_ts = gt_timestamps[closest_idx]
+            time_diff = abs(closest_ts - ts)
+            print(f"当前子图：submap_{submap_id} ts {ts}")
+            if time_diff < TIME_TOLERANCE:
+                print(f"精确匹配：submap_{submap_id} 使用 {closest_ts}（误差 {time_diff:.6f} 秒）")
+                first_pose = gt_poses[closest_ts]
+            else:
+                # 尝试插值
+                prev_ts, next_ts = find_closest_poses(gt_poses, ts)
+                
+                if prev_ts is not None and next_ts is not None and abs(prev_ts - next_ts) < INTERPOLATE_TIME_TOLERANCE:
+                    alpha = (ts - prev_ts) / (next_ts - prev_ts)
+                    print(
+                        f"插值匹配：submap_{submap_id}\n"
+                        f"前帧 {prev_ts}, 后帧 {next_ts}, 权重 alpha={alpha:.3f}"
+                    )
+                    first_pose = interpolate_pose(gt_poses[prev_ts], gt_poses[next_ts], alpha)
+                else:
+                    print(
+                        f"前后帧时间差：{ next_ts - prev_ts}\n"
+                        f"警告：submap_{submap_id} 无法插值（缺少合适的前后帧数据）")
+                    continue
 
         # 融合子图到全局地图
         for key, p_meas in occ_map.items():

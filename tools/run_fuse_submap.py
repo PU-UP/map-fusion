@@ -7,6 +7,10 @@
 import sys
 import os
 import subprocess
+import matplotlib.pyplot as plt
+
+plt.rcParams['font.sans-serif'] = ['Noto Sans CJK SC', 'Noto Sans CJK SC', 'WenQuanYi Micro Hei', 'SimHei']
+plt.rcParams['axes.unicode_minus'] = False
 
 def main():
     """主函数"""

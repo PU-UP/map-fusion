@@ -5,8 +5,7 @@ from fuse_submaps import GridMap, decode_key, encode_key
 import matplotlib as mpl
 import time
 
-# 配置 matplotlib 支持中文显示
-mpl.rcParams['font.sans-serif'] = ['SimHei']
+mpl.rcParams['font.sans-serif'] = ['Noto Sans CJK JP' , 'Noto Sans CJK SC', 'WenQuanYi Micro Hei', 'SimHei']
 mpl.rcParams['axes.unicode_minus'] = False
 
 def extract_occupied_cells(submap: GridMap, res: float) -> np.ndarray:
